@@ -110,16 +110,20 @@ namespace StackExchange.Redis
         /// </summary>
         public Task<bool> OnConnectedAsync(LogProxy log = null, bool sendTracerIfConnected = false)
         {
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (_pendingConnectionMonitors)
+            {
+                _pendingConnectionMonitors.Add(tcs);
+            }
             if (!IsConnected)
             {
-                var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                lock (_pendingConnectionMonitors)
-                {
-                    _pendingConnectionMonitors.Add(tcs);
-                }
+                // Not yet connected? - so return the awaitable task!
                 return tcs.Task;
             }
-            else if (sendTracerIfConnected)
+
+            // We are already connected.
+            // we can forget the awaitable task, and leave it in _pendingConnectionMonitors nobody will ever await on it, and the amount of garbage until next connection state change is small
+            if (sendTracerIfConnected)
             {
                 return SendTracer(log);
             }
