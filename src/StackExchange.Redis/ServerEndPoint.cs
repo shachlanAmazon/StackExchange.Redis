@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Net;
 using System.Runtime.CompilerServices;
@@ -76,6 +75,59 @@ namespace StackExchange.Redis
         public bool IsConnected => interactive?.IsConnected == true;
 
         public bool IsConnecting => interactive?.IsConnecting == true;
+
+        private readonly List<TaskCompletionSource<bool>> _pendingConnectionMonitors = new List<TaskCompletionSource<bool>>();
+
+        internal void OnConnectionStateChange(State oldState, State newState)
+        {
+            switch (newState)
+            {
+                case State.ConnectedEstablished:
+                    lock (_pendingConnectionMonitors)
+                    {
+                        foreach (var tcs in _pendingConnectionMonitors)
+                        {
+                            tcs.TrySetResult(true);
+                        }
+                        _pendingConnectionMonitors.Clear();
+                    }
+                    break;
+                case State.Disconnected:
+                    lock (_pendingConnectionMonitors)
+                    {
+                        foreach (var tcs in _pendingConnectionMonitors)
+                        {
+                            tcs.TrySetResult(false);
+                        }
+                        _pendingConnectionMonitors.Clear();
+                    }
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Awaitable state seeing if this endpoint is connected.
+        /// </summary>
+        public Task<bool> OnConnectedAsync(LogProxy log = null, bool sendTracerIfConnected = false)
+        {
+            if (!IsConnected)
+            {
+                var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                lock (_pendingConnectionMonitors)
+                {
+                    _pendingConnectionMonitors.Add(tcs);
+                }
+                return tcs.Task;
+            }
+            else if (sendTracerIfConnected)
+            {
+                return SendTracer(log);
+            }
+            else
+            {
+                return Task.FromResult(true);
+            }
+        }
 
         internal Exception LastException
         {
@@ -493,6 +545,7 @@ namespace StackExchange.Redis
             }
             return Task.CompletedTask;
         }
+
         private async Task OnEstablishingAsyncAwaited(PhysicalConnection connection, Task handshake)
         {
             try
@@ -504,6 +557,7 @@ namespace StackExchange.Redis
                 connection.RecordConnectionFailed(ConnectionFailureType.InternalFailure, ex);
             }
         }
+        
         internal void OnFullyEstablished(PhysicalConnection connection)
         {
             try

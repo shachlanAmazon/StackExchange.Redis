@@ -1230,6 +1230,7 @@ namespace StackExchange.Redis
                 return arr;
             }
         }
+
         internal ServerEndPoint GetServerEndPoint(EndPoint endpoint, LogProxy log = null, bool activate = true)
         {
             if (endpoint == null) return null;
@@ -1720,26 +1721,22 @@ namespace StackExchange.Redis
                         for (int i = 0; i < available.Length; i++)
                         {
                             Trace("Testing: " + Format.ToString(endpoints[i]));
+
                             var server = GetServerEndPoint(endpoints[i]);
                             //server.ReportNextFailure();
                             servers[i] = server;
+                            // This awaits either the endpoint's initial connection, or a tracer if we're already connected
+                            // (which is the reconfigure case)
+                            available[i] = server.OnConnectedAsync(log, sendTracerIfConnected: true);
+
                             if (reconfigureAll && server.IsConnected)
                             {
                                 log?.WriteLine($"Refreshing {Format.ToString(server.EndPoint)}...");
-                                // note that these will be processed synchronously *BEFORE* the tracer is processed,
+                                // Note that these will be processed synchronously *BEFORE* the tracer is processed,
                                 // so we know that the configuration will be up to date if we see the tracer
                                 server.AutoConfigure(null);
                             }
-                            log?.WriteLine($"Server endpoint {server.EndPoint} in state {server.ConnectionState}");
-                            available[i] = server.SendTracer(log);
-                            if (useTieBreakers)
-                            {
-                                log?.WriteLine($"Requesting tie-break from {Format.ToString(server.EndPoint)} > {RawConfig.TieBreaker}...");
-                                Message msg = Message.Create(0, flags, RedisCommand.GET, tieBreakerKey);
-                                msg.SetInternalCall();
-                                msg = LoggingMessage.Create(log, msg);
-                                tieBreakers[i] = server.WriteDirectAsync(msg, ResultProcessor.String);
-                            }
+                            log?.WriteLine($"Server endpoint {Format.ToString(server.EndPoint)} is in {server.ConnectionState}");
                         }
 
                         watch ??= Stopwatch.StartNew();
@@ -1747,6 +1744,21 @@ namespace StackExchange.Redis
                         log?.WriteLine($"Allowing endpoints {TimeSpan.FromMilliseconds(remaining)} to respond...");
                         Trace("Allowing endpoints " + TimeSpan.FromMilliseconds(remaining) + " to respond...");
                         await WaitAllIgnoreErrorsAsync(available, remaining, log).ForAwait();
+
+                        // After we've successfully connected (and authed), kickoff tie breakers if needed
+                        if (useTieBreakers)
+                        {
+                            for (int i = 0; i < available.Length; i++)
+                            {
+                                var server = servers[i];
+
+                                log?.WriteLine($"Requesting tie-break from {Format.ToString(server.EndPoint)} > {RawConfig.TieBreaker}...");
+                                Message msg = Message.Create(0, flags, RedisCommand.GET, tieBreakerKey);
+                                msg.SetInternalCall();
+                                msg = LoggingMessage.Create(log, msg);
+                                tieBreakers[i] = server.WriteDirectAsync(msg, ResultProcessor.String);
+                            }
+                        }
 
                         EndPointCollection updatedClusterEndpointCollection = null;
                         for (int i = 0; i < available.Length; i++)
