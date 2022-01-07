@@ -260,28 +260,13 @@ namespace StackExchange.Redis
         /// </summary>
         public override string ToString() => (string)this;
 
-        internal static unsafe bool Equals(byte[] x, byte[] y)
+        internal static bool Equals(byte[] x, byte[] y)
         {
             if ((object)x == (object)y) return true; // ref equals
             if (x == null || y == null) return false;
-            int len = x.Length;
-            if (len != y.Length) return false;
+            if (x.Length != y.Length) return false;
 
-            int octets = len / 8, spare = len % 8;
-            fixed (byte* x8 = x, y8 = y)
-            {
-                long* x64 = (long*)x8, y64 = (long*)y8;
-                for (int i = 0; i < octets; i++)
-                {
-                    if (x64[i] != y64[i]) return false;
-                }
-                int offset = len - spare;
-                while (spare-- != 0)
-                {
-                    if (x8[offset] != y8[offset++]) return false;
-                }
-            }
-            return true;
+            return x.AsSpan().SequenceEqual(y.AsSpan());
         }
 
         internal static unsafe int GetHashCode(ReadOnlyMemory<byte> memory)

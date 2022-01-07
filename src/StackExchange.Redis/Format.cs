@@ -330,5 +330,25 @@ namespace StackExchange.Redis
                 return Encoding.UTF8.GetString(ptr, span.Length);
             }
         }
+
+#if !NETCOREAPP3_1_OR_GREATER
+        internal static unsafe int GetBytes(this Encoding encoding, in ReadOnlySpan<char> chars, Span<byte> bytes)
+        {
+            if (chars.IsEmpty) return 0;
+            fixed (char* cPtr = chars)
+            fixed (byte* bPtr = bytes)
+            {
+                return encoding.GetBytes(cPtr, chars.Length, bPtr, bytes.Length);
+            }
+        }
+        internal static unsafe string GetString(this Encoding encoding, in ReadOnlySpan<byte> bytes)
+        {
+            if (bytes.IsEmpty) return "";
+            fixed (byte* bPtr = bytes)
+            {
+                return encoding.GetString(bPtr, bytes.Length);
+            }
+        }
+#endif
     }
 }

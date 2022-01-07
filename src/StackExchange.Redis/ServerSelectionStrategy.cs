@@ -70,13 +70,14 @@ namespace StackExchange.Redis
             if (key.IsNull) return NoSlot;
             unchecked
             {
-                var blob = (byte[])key;
-                fixed (byte* ptr = blob)
+                var bytes = key.GetBytes(out var leased);
+                try
                 {
+                    fixed (byte* ptr = bytes.Array)
                     fixed (ushort* crc16tab = s_crc16tab)
                     {
-                        int offset = 0, count = blob.Length, start, end;
-                        if ((start = IndexOf(ptr, (byte)'{', 0, count - 1)) >= 0
+                        int offset = bytes.Offset, count = bytes.Count, start, end;
+                        if ((start = IndexOf(ptr, (byte)'{', offset, count - 1)) >= 0
                             && (end = IndexOf(ptr, (byte)'}', start + 1, count)) >= 0
                             && --end != start)
                         {
@@ -89,6 +90,10 @@ namespace StackExchange.Redis
                             crc = ((crc << 8) ^ crc16tab[((crc >> 8) ^ ptr[offset++]) & 0x00FF]) & 0x0000FFFF;
                         return (int)(crc % RedisClusterSlotCount);
                     }
+                }
+                finally
+                {
+                    if (leased) System.Buffers.ArrayPool<byte>.Shared.Return(bytes.Array);
                 }
             }
         }

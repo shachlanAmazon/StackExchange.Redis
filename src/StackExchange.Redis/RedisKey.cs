@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Buffers;
 using System.Text;
 
 namespace StackExchange.Redis
@@ -18,8 +19,6 @@ namespace StackExchange.Redis
         /// Creates a <see cref="RedisKey"/> from a string.
         /// </summary>
         public RedisKey(string key) : this(null, key) { }
-
-        internal RedisKey AsPrefix() => new RedisKey((byte[])this, null);
 
         internal bool IsNull => KeyPrefix == null && KeyValue == null;
 
@@ -141,7 +140,19 @@ namespace StackExchange.Redis
                 if (keyValue0 is byte[] keyBytes1 && keyValue1 is byte[] keyBytes2) return RedisValue.Equals(keyBytes1, keyBytes2);
             }
 
-            return RedisValue.Equals(ConcatenateBytes(keyPrefix0, keyValue0, null), ConcatenateBytes(keyPrefix1, keyValue1, null));
+            bool leased0 = false, leased1 = false;
+            ArraySegment<byte> combined0 = default, combined1 = default;
+            try
+            {
+                combined0 = RedisKey.GetBytes(keyPrefix0, keyValue0, out leased0);
+                combined1 = RedisKey.GetBytes(keyPrefix1, keyValue1, out leased1);
+                return combined0.AsSpan().SequenceEqual(combined1.AsSpan());
+            }
+            finally
+            {
+                if (leased0) ArrayPool<byte>.Shared.Return(combined0.Array);
+                if (leased1) ArrayPool<byte>.Shared.Return(combined1.Array);
+            }
         }
 
         /// <summary>
@@ -163,7 +174,7 @@ namespace StackExchange.Redis
         internal RedisValue AsRedisValue()
         {
             if (KeyPrefix == null && KeyValue is string keyString) return keyString;
-            return (byte[])this;
+            return AsBytes();
         }
 
         internal void AssertNotNull()
@@ -194,7 +205,9 @@ namespace StackExchange.Redis
         /// Obtain the <see cref="RedisKey"/> as a <see cref="T:byte[]"/>.
         /// </summary>
         /// <param name="key">The key to get a byte array for.</param>
-        public static implicit operator byte[] (RedisKey key) => ConcatenateBytes(key.KeyPrefix, key.KeyValue, null);
+        public static implicit operator byte[] (RedisKey key) => key.AsBytes();
+
+        internal byte[] AsBytes() => GetBytes(out _, false).Array;
 
         /// <summary>
         /// Obtain the key as a <see cref="string"/>.
@@ -202,29 +215,86 @@ namespace StackExchange.Redis
         /// <param name="key">The key to get a string for.</param>
         public static implicit operator string(RedisKey key)
         {
-            byte[] arr;
-            if (key.KeyPrefix == null)
-            {
-                if (key.KeyValue == null) return null;
+            if (key.KeyPrefix is null && key.KeyValue is string s) return s;
 
-                if (key.KeyValue is string keyString) return keyString;
-
-                arr = (byte[])key.KeyValue;
-            }
-            else
-            {
-                arr = (byte[])key;
-            }
-            if (arr == null) return null;
+            var bytes = key.GetBytes(out var leased);
+            if (bytes.Count == 0 && !leased) return key.IsNull ? null : "";
             try
             {
-                return Encoding.UTF8.GetString(arr);
+                return Encoding.UTF8.GetString(bytes.Array, bytes.Offset, bytes.Count);
             }
             catch
             {
-                return BitConverter.ToString(arr);
+                return BitConverter.ToString(bytes.Array, bytes.Offset, bytes.Count);
+            }
+            finally
+            {
+                if (leased) ArrayPool<byte>.Shared.Return(bytes.Array);
             }
         }
+
+        int ByteCount() => ByteCount(KeyPrefix, KeyValue);
+        static int ByteCount(byte[] keyPrefix, object keyValue) => (keyPrefix?.Length ?? 0) + keyValue switch
+        {
+            null => 0,
+            string s => Encoding.UTF8.GetByteCount(s),
+            _ => ((byte[])keyValue).Length,
+        };
+
+        internal static ArraySegment<byte> GetBytes(byte[] keyPrefix, object keyValue, out bool leased, bool allowLeased = true)
+        {
+            if (keyPrefix is null)
+            {
+                switch (keyValue)
+                {
+                    case null:
+                        leased = false;
+                        return default;
+                    case byte[] arr:
+                        leased = false;
+                        return new ArraySegment<byte>(arr);
+                    case string s when s.Length == 0:
+                        leased = false;
+                        return new ArraySegment<byte>(Array.Empty<byte>());
+                }
+            }
+            var len = ByteCount(keyPrefix, keyValue);
+            if (len == 0)
+            {
+                leased = false;
+                return new ArraySegment<byte>(Array.Empty<byte>());
+            }
+            else
+            {
+                byte[] arr = allowLeased ? ArrayPool<byte>.Shared.Rent(len) : new byte[len];
+                leased = allowLeased;
+                CopyTo(keyPrefix, keyValue, arr);
+                return new ArraySegment<byte>(arr, 0, len);
+            }
+
+            static void CopyTo(byte[] keyPrefix, object keyValue, Span<byte> span)
+            {
+                if (keyPrefix is not null)
+                {
+                    keyPrefix.AsSpan().CopyTo(span);
+                    span = span.Slice(keyPrefix.Length);
+                }
+                switch (keyValue)
+                {
+                    case null:
+                        break;
+                    case string s:
+                        Encoding.UTF8.GetBytes(s.AsSpan(), span);
+                        break;
+                    default:
+                        var value = ((byte[])keyValue).AsSpan();
+                        value.CopyTo(span);
+                        break;
+                }
+            }
+        }
+        internal ArraySegment<byte> GetBytes(out bool leased, bool allowLeased = true)
+            => GetBytes(KeyPrefix, KeyValue, out leased, allowLeased);
 
         /// <summary>
         /// Concatenate two keys
@@ -290,7 +360,7 @@ namespace StackExchange.Redis
         /// </para>
         /// </summary>
         /// <param name="prefix">The prefix to prepend.</param>
-        public RedisKey Prepend(RedisKey prefix) => WithPrefix(prefix, this);
+        public RedisKey Prepend(RedisKey prefix) => WithPrefix(prefix.AsBytes(), this);
 
         /// <summary>
         /// <para>Appends p to this RedisKey, returning a new RedisKey.</para>
@@ -300,6 +370,6 @@ namespace StackExchange.Redis
         /// </para>
         /// </summary>
         /// <param name="suffix">The suffix to append.</param>
-        public RedisKey Append(RedisKey suffix) => WithPrefix(this, suffix);
+        public RedisKey Append(RedisKey suffix) => WithPrefix(this.AsBytes(), suffix);
     }
 }
