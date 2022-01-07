@@ -1412,9 +1412,15 @@ namespace StackExchange.Redis
         /// <param name="asyncState">The async state object to pass to the created <see cref="RedisSubscriber"/>.</param>
         public ISubscriber GetSubscriber(object asyncState = null)
         {
-            if (RawConfig.Proxy == Proxy.Twemproxy) throw new NotSupportedException("The pub/sub API is not available via twemproxy");
-            return new RedisSubscriber(this, asyncState);
+            if (RawConfig.Proxy == Proxy.Twemproxy) ThrowNotSupported();
+            return asyncState is null
+                ? (_defaultSubscriber ??= new RedisSubscriber(this, null))
+                : new RedisSubscriber(this, asyncState);
+
+            static void ThrowNotSupported() => throw new NotSupportedException("The pub/sub API is not available via twemproxy");
         }
+
+        private ISubscriber _defaultSubscriber;
 
         // applies common db number defaults and rules
         internal int ApplyDefaultDatabase(int db)

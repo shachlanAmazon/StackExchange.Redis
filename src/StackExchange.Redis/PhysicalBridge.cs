@@ -100,7 +100,7 @@ namespace StackExchange.Redis
         }
 
         internal State ConnectionState => (State)state;
-        internal bool IsBeating => Interlocked.CompareExchange(ref beating, 0, 0) == 1;
+        internal bool IsBeating => Volatile.Read(ref beating) == 1;
 
         internal long OperationCount => Interlocked.Read(ref operationCount);
 
@@ -257,7 +257,7 @@ namespace StackExchange.Redis
         {
             counters.OperationCount = OperationCount;
             counters.SocketCount = Interlocked.Read(ref socketCount);
-            counters.WriterCount = Interlocked.CompareExchange(ref activeWriters, 0, 0);
+            counters.WriterCount = Volatile.Read(ref activeWriters);
             counters.NonPreferredEndpointCount = Interlocked.Read(ref nonPreferredEndpointCount);
             physical?.GetCounters(counters);
         }
@@ -272,8 +272,8 @@ namespace StackExchange.Redis
 
         private Channel<PendingSubscriptionState> GetSubscriptionQueue()
         {
-            var queue = _subscriptionBackgroundQueue;
-            if (queue == null)
+            var queue = Volatile.Read(ref _subscriptionBackgroundQueue);
+            if (queue is null)
             {
                 queue = Channel.CreateUnbounded<PendingSubscriptionState>(s_subscriptionQueueOptions);
                 var existing = Interlocked.CompareExchange(ref _subscriptionBackgroundQueue, queue, null);
@@ -291,7 +291,7 @@ namespace StackExchange.Redis
         {
             try
             {
-                Interlocked.CompareExchange(ref _subscriptionBackgroundQueue, null, null)?.Writer.TryComplete();
+                Volatile.Read(ref _subscriptionBackgroundQueue)?.Writer.TryComplete();
             }
             catch { }
         }
@@ -299,7 +299,7 @@ namespace StackExchange.Redis
         private async Task ExecuteSubscriptionLoop() // pushes items that have been enqueued over the bridge
         {
             // note: this will execute on the default pool rather than our dedicated pool; I'm... OK with this
-            var queue = _subscriptionBackgroundQueue ?? Interlocked.CompareExchange(ref _subscriptionBackgroundQueue, null, null); // just to be sure we can read it!
+            var queue = Volatile.Read(ref _subscriptionBackgroundQueue); // just to be sure we can read it!
             try
             {
                 while (await queue.Reader.WaitToReadAsync().ForAwait() && queue.Reader.TryRead(out var next))

@@ -197,7 +197,7 @@ namespace StackExchange.Redis
         {
             private Action<RedisChannel, RedisValue> _handlers;
             private ChannelMessageQueue _queues;
-            private ServerEndPoint owner;
+            private ServerEndPoint _subscribedServer;
 
             public void Add(Action<RedisChannel, RedisValue> handler, ChannelMessageQueue queue)
             {
@@ -236,7 +236,7 @@ namespace StackExchange.Redis
                 // note: check we can create the message validly *before* we swap the owner over (Interlocked)
                 var state = PendingSubscriptionState.Create(channel, this, flags, true, internalCall, asyncState, selected.IsReplica);
 
-                if (Interlocked.CompareExchange(ref owner, selected, null) != null) return null;
+                if (Interlocked.CompareExchange(ref _subscribedServer, selected, null) != null) return null;
                 try
                 {
                     if (!bridge.TryEnqueueBackgroundSubscriptionWrite(state))
@@ -249,7 +249,7 @@ namespace StackExchange.Redis
                 catch
                 {
                     // clear the owner if it is still us
-                    Interlocked.CompareExchange(ref owner, null, selected);
+                    Interlocked.CompareExchange(ref _subscribedServer, null, selected);
                     throw;
                 }
             }
@@ -257,7 +257,7 @@ namespace StackExchange.Redis
             [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "RCS1210:Return completed task instead of returning null.", Justification = "Intentional for efficient success check")]
             public Task UnsubscribeFromServer(in RedisChannel channel, CommandFlags flags, object asyncState, bool internalCall)
             {
-                var oldOwner = Interlocked.Exchange(ref owner, null);
+                var oldOwner = Interlocked.Exchange(ref _subscribedServer, null);
                 var bridge = oldOwner?.GetBridge(ConnectionType.Subscription, false);
                 if (bridge == null) return null;
 
@@ -303,7 +303,7 @@ namespace StackExchange.Redis
                 }
             }
 
-            internal ServerEndPoint GetOwner() => Volatile.Read(ref owner);
+            internal ServerEndPoint GetOwner() => Volatile.Read(ref _subscribedServer);
 
             internal void Resubscribe(in RedisChannel channel, ServerEndPoint server)
             {
@@ -320,7 +320,7 @@ namespace StackExchange.Redis
             internal bool Validate(ConnectionMultiplexer multiplexer, in RedisChannel channel)
             {
                 bool changed = false;
-                var oldOwner = Volatile.Read(ref owner);
+                var oldOwner = Volatile.Read(ref _subscribedServer);
                 if (oldOwner != null && !oldOwner.IsSelectable(RedisCommand.PSUBSCRIBE))
                 {
                     if (UnsubscribeFromServer(channel, CommandFlags.FireAndForget, null, true) != null)
