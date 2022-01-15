@@ -192,10 +192,9 @@ namespace StackExchange.Redis.Tests
                 var before = muxer.OperationCount;
 
                 Log("sleeping to test heartbeat...");
-                await Task.Delay(5000).ForAwait();
+                await UntilCondition(TimeSpan.FromSeconds(5), () => muxer.OperationCount >= before + 2).ForAwait();
 
                 var after = muxer.OperationCount;
-
                 Assert.True(after >= before + 2, $"after: {after}, before: {before}");
             }
         }
@@ -402,7 +401,7 @@ namespace StackExchange.Redis.Tests
                         var before = innerMuxer.OperationCount;
 
                         Log("sleeping to test heartbeat...");
-                        await Task.Delay(8000).ForAwait();
+                        await UntilCondition(TimeSpan.FromSeconds(10), () => innerMuxer.OperationCount >= before + 2).ForAwait();
 
                         var after = innerMuxer.OperationCount;
                         Assert.True(after >= before + 2, $"after: {after}, before: {before}");
