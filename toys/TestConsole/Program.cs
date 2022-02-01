@@ -9,6 +9,26 @@ using StackExchange.Redis;
 
 namespace TestConsole
 {
+    public class IntRange
+    {
+        public int start;
+        public int length;
+        public IntRange (int start, int length)
+        {
+            this.start = start;
+            this.length = length;
+        }
+        public bool inRange(int value)
+        {
+            return value >= start && value < end();
+        }
+
+        public int end()
+        {
+            return start + length;
+        }
+    }
+
     internal static class Program
     {
 
@@ -102,25 +122,50 @@ return cjson.encode(groupResultData)";
         static readonly string[] firstValues = new string[] { "100", "False", "True" };
         static readonly RedisKey[] writeKeys = new[] { "{node}/firstKey", "'{node}/secondKey" }.Select(key => new RedisKey(key)).ToArray();
         static readonly RedisKey[] readKeys = new[] { "{node}/a", "'{node}/b", "'{node}/c", "'{node}/secondKey", "'{node}/firstKey" }.Select(key => new RedisKey(key)).ToArray();
+        static readonly Random random = new Random();  
 
-        private static Task<RedisResult> runWriteScript(IDatabase db, int threadIndex)
+        private static RedisKey[] getThreadKeys(int threadIndex)
         {
-            var args = Enumerable.Concat<string>(firstValues, Enumerable.Range(0, 3200).Select(index => $"{valueHeader}-{index}-{threadIndex}"))
-                .Select(arg => new RedisValue(arg))
-                .ToArray();
-            return db.ScriptEvaluateAsync(writeScript, writeKeys, args);
+            return new[] { "{node}/firstKey" + threadIndex, "'{node}/secondKey" + threadIndex }.Select(key => new RedisKey(key)).ToArray();
         }
 
-        private static Task<RedisResult> runReadScript(IDatabase db, int threadIndex)
+        private static RedisResult runWriteScript(IDatabase db, int threadIndex)
         {
-            var args = new RedisValue[] { new RedisValue("True") };
-            return db.ScriptEvaluateAsync(readScript, readKeys, args);
+            var numberOfExtraArguments = 3100;
+            var args = Enumerable.Concat<string>(firstValues, Enumerable.Range(0, numberOfExtraArguments).Select(index => $"{valueHeader}-{index}-{threadIndex}"))
+                .Select(arg => new RedisValue(arg))
+                .ToArray();
+            try
+            {
+                return db.ScriptEvaluate(writeScript, getThreadKeys(threadIndex), args);
+            }catch (Exception)
+            {
+                Console.WriteLine($"failed writing {threadIndex}");
+                throw;
+            }
+        }
+
+        private static RedisResult runReadScript(IDatabase db, int threadIndex)
+        {
+            try { 
+                var args = new RedisValue[] { new RedisValue("True") };
+                return db.ScriptEvaluate(readScript, readKeys, args);
+            }
+            catch (Exception)
+            {
+                throw;
+            }
         }
 
         private static ConfigurationOptions options(string server)
         {
-            var timeout = 1000;
+            var timeout = 5000;
             var options = ConfigurationOptions.Parse(server);
+
+            options.ReconnectRetryPolicy = new LinearRetry(500);
+            options.AbortOnConnectFail = false;
+            options.ConfigCheckSeconds = 120;
+            options.HighPrioritySocketThreads = true;
             options.Ssl = true;
             options.SslProtocols = SslProtocols.Tls12;
 
@@ -132,28 +177,66 @@ return cjson.encode(groupResultData)";
 
         private static void massiveCalls(ConfigurationOptions options)
         {
+            IntRange writeRange = new IntRange(0, 2);
+            IntRange simpleWriteRange = new IntRange(writeRange.end(), 3);
+            IntRange readRange = new IntRange(simpleWriteRange.end(), 2);
+            IntRange keyExpireTransaction = new IntRange(readRange.end(), 1);
+            IntRange keyDeleteTransaction = new IntRange(keyExpireTransaction.end(), 1);
+
             List<Thread> list = new List<Thread>();
             for (int i = 0; i < 30; i++)
             {
                 var j = i;
                 var t = new Thread(() => {
                     var writeFile = new StreamWriter($"c:\\textwriter{j}.txt");
-                    var tasks = new List<Task<RedisResult>>();
                     var conn = ConnectionMultiplexer.Connect(options, writeFile);
-                    var asyncState = new Object();
-                    var db = conn.GetDatabase(-1, asyncState);
+                    var db = conn.GetDatabase();
                     try
                     {
-                        for (var counter = 0; counter < 10000; counter++)
+                        for (var counter = 0; counter < 1000; counter++)
                         {
-                            if (tasks.Count > 35)
+                            var randomCoinToss = random.Next(keyDeleteTransaction.end());
+                            if (writeRange.inRange(randomCoinToss))
                             {
-                                Console.WriteLine("Waiting on tasks for " + j);
-                                Task.WaitAll(tasks.ToArray());
-                                tasks.Clear();
+                                if (counter % 10 == 0)
+                                {
+                                    Console.WriteLine($"write script {j} - {counter}");
+                                }
+                                runWriteScript(db, j);
                             }
-                            tasks.Add(runWriteScript(db, j));
-                            tasks.Add(runReadScript(db, j));
+                            else if (simpleWriteRange.inRange(randomCoinToss))
+                            {
+                                if (counter % 10 == 0)
+                                {
+                                    Console.WriteLine($"set add {j} - {counter}");
+                                }
+                                db.SetAdd(writeKeys[0], new RedisValue(j.ToString()));
+                                db.SetAdd(writeKeys[1], new RedisValue(j.ToString()));
+                            }
+                            else if (readRange.inRange(randomCoinToss))
+                            {
+                                if (counter % 10 == 0)
+                                {
+                                    Console.WriteLine($"read script {j} - {counter}");
+                                }
+                                runReadScript(db, j);
+                            }
+                            else if (keyExpireTransaction.inRange(randomCoinToss))
+                            {
+                                if (counter % 10 == 0)
+                                {
+                                    Console.WriteLine($"key expire {j} - {counter}");
+                                }
+                                performKeyExpireTransaction(db, j);
+                            }
+                            else
+                            {
+                                if (counter % 10 == 0)
+                                {
+                                    Console.WriteLine($"key delete {j} - {counter}");
+                                }
+                                performKeyDeleteTransaction(db, j);
+                            }
                         }
                     }
                     finally
@@ -162,6 +245,7 @@ return cjson.encode(groupResultData)";
                         conn.Close();
                         writeFile.Flush();
                         writeFile.Close();
+
                     }
                 });
                 list.Add(t);
@@ -173,7 +257,26 @@ return cjson.encode(groupResultData)";
             }
         }
 
-        public static async Task Main()
+        private static void performKeyDeleteTransaction(IDatabase db, int j)
+        {
+            var transaction = db.CreateTransaction();
+
+            transaction.KeyDeleteAsync(writeKeys[0]);
+            transaction.KeyDeleteAsync(writeKeys[1]);
+
+            bool result = transaction.Execute();
+        }
+        private static void performKeyExpireTransaction(IDatabase db, int j)
+        {
+            var transaction = db.CreateTransaction();
+
+            transaction.KeyExpireAsync(writeKeys[0], TimeSpan.FromSeconds(10));
+            transaction.KeyExpireAsync(writeKeys[1], TimeSpan.FromSeconds(10));
+
+            bool result = transaction.Execute();
+        }
+
+        public static void Main()
         {
 #pragma warning disable CS0219 // Variable is assigned but its value is never used
             var redisServer = "clustercfg.shachlan-se-test-devo.sstwrm.use1devo.elmo-dev.amazonaws.com:6379";
@@ -182,14 +285,14 @@ return cjson.encode(groupResultData)";
             var client = ConnectionMultiplexer.Connect(options(redisServer));
             //var client = ConnectionMultiplexer.Connect("stack-exchange-test-no-tls.4l6gyg.clustercfg.memorydb.eu-west-1.amazonaws.com");
             client.GetDatabase().Ping();
-            var db = client.GetDatabase(0);
+            var db = client.GetDatabase();
             db.StringSet("Ahoy", "Matey");
             Console.WriteLine(db.StringGet("Ahoy"));
 
-            var scriptResult = await runWriteScript(db, 0);
+            var scriptResult = runWriteScript(db, 0);
             Console.WriteLine("Result: " + scriptResult.ToString());
 
-            //massiveCalls(options(memorydbServer));
+            massiveCalls(options(memorydbServer));
         }
     }
 }
