@@ -536,8 +536,7 @@ namespace StackExchange.Redis
                 allowAdmin = allowAdmin,
                 defaultVersion = defaultVersion,
                 connectTimeout = connectTimeout,
-                User = User,
-                Password = Password,
+                CredentialsProvider = CredentialsProvider,
                 tieBreaker = tieBreaker,
                 writeBuffer = writeBuffer,
                 ssl = ssl,
@@ -724,7 +723,7 @@ namespace StackExchange.Redis
 
         private void Clear()
         {
-            ClientName = ServiceName = User = Password = tieBreaker = sslHost = configChannel = null;
+            ClientName = ServiceName = tieBreaker = sslHost = configChannel = CredentialsProvider = null;
             keepAlive = syncTimeout = asyncTimeout = connectTimeout = writeBuffer = connectRetry = configCheckSeconds = DefaultDatabase = null;
             allowAdmin = abortOnConnectFail = highPrioritySocketThreads = resolveDns = ssl = null;
             SslProtocols = null;
