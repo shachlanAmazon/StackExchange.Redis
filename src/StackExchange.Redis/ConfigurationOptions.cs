@@ -9,6 +9,7 @@ using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
+using StackExchange.Redis.Interfaces;
 using static StackExchange.Redis.ConnectionMultiplexer;
 
 namespace StackExchange.Redis
@@ -90,7 +91,8 @@ namespace StackExchange.Redis
                 TieBreaker = "tiebreaker",
                 Version = "version",
                 WriteBuffer = "writeBuffer",
-                CheckCertificateRevocation = "checkCertificateRevocation";
+                CheckCertificateRevocation = "checkCertificateRevocation",
+                ReauthenticateAfterSeconds = "reauthenticateAfterSeconds";
 
             private static readonly Dictionary<string, string> normalizedOptions = new[]
             {
@@ -119,7 +121,8 @@ namespace StackExchange.Redis
                 TieBreaker,
                 Version,
                 WriteBuffer,
-                CheckCertificateRevocation
+                CheckCertificateRevocation,
+                ReauthenticateAfterSeconds
             }.ToDictionary(x => x, StringComparer.OrdinalIgnoreCase);
 
             public static string TryNormalize(string value)
@@ -337,12 +340,20 @@ namespace StackExchange.Redis
         /// <summary>
         /// The user to use to authenticate with the server.
         /// </summary>
-        public string User { get; set; }
+        public string User { get => CredentialsProvider?.getUser(); set
+            {
+                CredentialsProvider = new SimpleCredentialsProvider(value, Password);
+            }
+        }
 
         /// <summary>
         /// The password to use to authenticate with the server.
         /// </summary>
-        public string Password { get; set; }
+        public string Password { get => CredentialsProvider?.getPassword(); set
+            {
+                CredentialsProvider = new SimpleCredentialsProvider(User, value);
+            }
+        }
 
         /// <summary>
         /// Specifies whether asynchronous operations should be invoked in a way that guarantees their original delivery order
@@ -477,6 +488,11 @@ namespace StackExchange.Redis
             get => configCheckSeconds.GetValueOrDefault(60);
             set => configCheckSeconds = value;
         }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        public ICredentialsProvider CredentialsProvider { get; set; }
 
         /// <summary>
         /// Parse the configuration from a comma-delimited configuration string
