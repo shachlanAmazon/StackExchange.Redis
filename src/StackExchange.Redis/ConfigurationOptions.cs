@@ -723,7 +723,8 @@ namespace StackExchange.Redis
 
         private void Clear()
         {
-            ClientName = ServiceName = tieBreaker = sslHost = configChannel = CredentialsProvider = null;
+            ClientName = ServiceName = tieBreaker = sslHost = configChannel = null;
+            CredentialsProvider = null;
             keepAlive = syncTimeout = asyncTimeout = connectTimeout = writeBuffer = connectRetry = configCheckSeconds = DefaultDatabase = null;
             allowAdmin = abortOnConnectFail = highPrioritySocketThreads = resolveDns = ssl = null;
             SslProtocols = null;

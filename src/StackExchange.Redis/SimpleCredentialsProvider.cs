@@ -28,10 +28,8 @@ namespace StackExchange.Redis
         string ICredentialsProvider.getUser() => this.user;
 
         /// <summary>
-        /// 
+        /// Equality based on fields.
         /// </summary>
-        /// <param name="obj"></param>
-        /// <returns></returns>
         public override bool Equals(object obj)
         {
             if (obj == null)
@@ -48,13 +46,17 @@ namespace StackExchange.Redis
         }
 
         /// <summary>
-        /// 
+        /// Returns a simple hash of the fields.
         /// </summary>
-        /// <returns></returns>
         public override int GetHashCode()
         {
             return this.user.GetHashCode()
                  ^ this.password.GetHashCode();
         }
+
+        /// <summary>
+        /// Returns an equivalent credentials provider.
+        /// </summary>
+        public object Clone() => new SimpleCredentialsProvider(user, password);
     }
 }
