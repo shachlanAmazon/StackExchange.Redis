@@ -17,22 +17,26 @@ using ZeroFormatter;
 
 namespace Intuit.Tax.DataProvider
 {
-    public class MemoryDBDataCacheProvider : DataCacheProvider
+    public class AverageLogger
+    {
+        public AverageLogger(string name, float interval) { }
+
+        internal void Add(long elapsedMilliseconds) { }
+    }
+
+    public class MemoryDBDataCacheProvider
     {
         private static readonly ILog logger = LogManager.GetLogger("MemoryDBDataCacheProvider");
         private static readonly string MODIFIED_GROUPS_GET_LUA_SCRIPT = GetWriteModifiedAttributesDataLuaScript();
         private static readonly string WRITE_GROUPS_LUA_SCRIPT = GetWriteGroupsLuaScript();
 
-        // do not use this instance directly
-        private static ConnectionMultiplexer INSTANCE;
-
         private static List<ConnectionMultiplexer> INSTANCE_POOL;
+
+        private const float ReportingIntervalInSecs = 1.0f;
 
 
         private static object lockObj = new object();
 
-        private IEncryptor iEncryptor;
-        private SecretAccessor secretAccessor;
         //private ConnectionMultiplexer connection;
 
         private static readonly RetryPolicy<long> LONG_RETURN_RETRY_POLICY = CreateRetryPolicy<long>();
@@ -40,14 +44,14 @@ namespace Intuit.Tax.DataProvider
         private static readonly RetryPolicy<RedisResult> REDIS_RESULT_RETURN_RETRY_POLICY = CreateRetryPolicy<RedisResult>();
         private static readonly RetryPolicy<RedisValue[]> REDIS_VALUES_RETURN_RETRY_POLICY = CreateRetryPolicy<RedisValue[]>();
 
-        private static readonly AverageLogger clearAverageLogger = new AverageLogger("MemoryDB Clear", MemoryDBBaseSettings.ReportingIntervalInSecs);
-        private static readonly AverageLogger clearModifiedAverageLogger = new AverageLogger("MemoryDB Clear Modified", MemoryDBBaseSettings.ReportingIntervalInSecs);
-        private static readonly AverageLogger existsAverageLogger = new AverageLogger("MemoryDB Exists", MemoryDBBaseSettings.ReportingIntervalInSecs);
-        private static readonly AverageLogger getModifiedAverageLogger = new AverageLogger("MemoryDB Get Modified", MemoryDBBaseSettings.ReportingIntervalInSecs);
-        private static readonly AverageLogger fileAverageLogger = new AverageLogger("MemoryDB Get File", MemoryDBBaseSettings.ReportingIntervalInSecs);
-        private static readonly AverageLogger updateModifiedAverageLogger = new AverageLogger("MemoryDB Update Modified", MemoryDBBaseSettings.ReportingIntervalInSecs);
-        private static readonly AverageLogger writeGroupsAverageLogger = new AverageLogger("MemoryDB Write Groups", MemoryDBBaseSettings.ReportingIntervalInSecs);
-        private static readonly AverageLogger getGroupsAverageLogger = new AverageLogger("MemoryDB Get Groups", MemoryDBBaseSettings.ReportingIntervalInSecs);
+        private static readonly AverageLogger clearAverageLogger = new AverageLogger("MemoryDB Clear", ReportingIntervalInSecs);
+        private static readonly AverageLogger clearModifiedAverageLogger = new AverageLogger("MemoryDB Clear Modified", ReportingIntervalInSecs);
+        private static readonly AverageLogger existsAverageLogger = new AverageLogger("MemoryDB Exists", ReportingIntervalInSecs);
+        private static readonly AverageLogger getModifiedAverageLogger = new AverageLogger("MemoryDB Get Modified", ReportingIntervalInSecs);
+        private static readonly AverageLogger fileAverageLogger = new AverageLogger("MemoryDB Get File", ReportingIntervalInSecs);
+        private static readonly AverageLogger updateModifiedAverageLogger = new AverageLogger("MemoryDB Update Modified", ReportingIntervalInSecs);
+        private static readonly AverageLogger writeGroupsAverageLogger = new AverageLogger("MemoryDB Write Groups", ReportingIntervalInSecs);
+        private static readonly AverageLogger getGroupsAverageLogger = new AverageLogger("MemoryDB Get Groups", ReportingIntervalInSecs);
 
 
         private readonly ConcurrentDictionary<string, string> lastVersionLookup = new ConcurrentDictionary<string, string>();
@@ -62,8 +66,8 @@ namespace Intuit.Tax.DataProvider
         /// <param name="dataCacheEnableExpiryCheck">Is expiry disabled</param>
         /// <param name="iEncryptor">The encryptor used for encrypting data</param>
         /// <param name="secretAccessor">Used to access secrets</param>
-        public MemoryDBDataCacheProvider(int dataCacheItemExpirySeconds, bool dataCacheEnableExpiryCheck, IEncryptor iEncryptor, SecretAccessor secretAccessor)
-        : this(dataCacheItemExpirySeconds, dataCacheEnableExpiryCheck, iEncryptor, secretAccessor, null)
+        public MemoryDBDataCacheProvider(int dataCacheItemExpirySeconds, bool dataCacheEnableExpiryCheck)
+        : this(dataCacheItemExpirySeconds, dataCacheEnableExpiryCheck, null)
         { }
 
         /// <summary>
@@ -74,11 +78,8 @@ namespace Intuit.Tax.DataProvider
         /// <param name="iEncryptor">The encryptor used for encrypting data</param>
         /// <param name="secretAccessor">Used to access secrets</param>
         /// <param name="connection">MemoryDB Multiplexer</param>
-        public MemoryDBDataCacheProvider(int dataCacheItemExpirySeconds, bool dataCacheEnableExpiryCheck,
-            IEncryptor iEncryptor, SecretAccessor secretAccessor, ConnectionMultiplexer connection)
+        public MemoryDBDataCacheProvider(int dataCacheItemExpirySeconds, bool dataCacheEnableExpiryCheck, ConnectionMultiplexer connection)
         {
-            this.iEncryptor = iEncryptor;
-            this.secretAccessor = secretAccessor;
             this.dataCacheItemExpirySeconds = dataCacheItemExpirySeconds;
             this.dataCacheEnableExpiryCheck = dataCacheEnableExpiryCheck;
 
@@ -139,9 +140,10 @@ namespace Intuit.Tax.DataProvider
             {
                 var options = GetConnectionOptions();
 
+
                 // permissions required:
                 // on ~tcs::* &* -@all +@read +@write +@set +@sortedset +@list +@hash +@string +@blocking +@connection +@transaction +@scripting +@pubsub +@keyspace +info +config +client +cluster
-                var multiPlexer = ConnectionMultiplexer.Connect(options, new MemoryDBLoggingTextWriter());
+                var multiPlexer = ConnectionMultiplexer.Connect(options);
 
                 multiPlexer.ServerMaintenanceEvent += (sender, ev) => logger.Warn("ServerMaintenanceEvent: " + ev.RawMessage);
                 multiPlexer.ErrorMessage += (sender, ev) => logger.Warn("ErrorMessage: " + ev.Message + " " + ev.EndPoint);
@@ -166,7 +168,7 @@ namespace Intuit.Tax.DataProvider
             catch (Exception e)
             {
                 logger.Error(e);
-                throw e;
+                throw;
             }
         }
 
@@ -175,30 +177,27 @@ namespace Intuit.Tax.DataProvider
             return new ConfigurationOptions
             {
                 EndPoints = {
-                    { MemoryDBBaseSettings.Host, MemoryDBBaseSettings.Port }
+                    { "clustercfg.stack-exchange-test-memorydb.sstwrm.memorydb-devo.us-east-1.amazonaws.com", 6379 }
                 },
                 ClientName = Environment.MachineName,
 
                 Ssl = true,
                 SslProtocols = SslProtocols.Tls12,
 
-                User = this.secretAccessor.resolve(MemoryDBBaseSettings.UsernameSecretName),
-                Password = this.secretAccessor.resolve(MemoryDBBaseSettings.PasswordSecretName),
-
-                ReconnectRetryPolicy = new LinearRetry(MemoryDBBaseSettings.ConnectionRetryDelayInMs),
+                ReconnectRetryPolicy = new LinearRetry(1500),
                 AbortOnConnectFail = false,
-                ConnectTimeout = MemoryDBBaseSettings.TimeoutInMs,
-                AsyncTimeout = MemoryDBBaseSettings.TimeoutInMs,
-                SyncTimeout = MemoryDBBaseSettings.TimeoutInMs,
-                ConfigCheckSeconds = MemoryDBBaseSettings.ConfigRefreshInSecs,
+                ConnectTimeout = 5000,
+                AsyncTimeout = 5000,
+                SyncTimeout = 5000,
+                ConfigCheckSeconds = 5,
                 HighPrioritySocketThreads = true
             };
         }
 
-        public override void AddOpenProjectHistory(string authId, string projectName, string moduleName, bool copyPerformed)
+        public void AddOpenProjectHistory(string authId, string projectName, string moduleName, bool copyPerformed)
         { }
 
-        public override long CheckProviderHealth()
+        public long CheckProviderHealth()
         {
             Func<Context, long> requestFtn = context =>
             {
@@ -211,7 +210,7 @@ namespace Intuit.Tax.DataProvider
             { });
         }
 
-        public override void ClearFile(string authId, string moduleName, string projectName)
+        public void ClearFile(string authId, string moduleName, string projectName)
         {
             Func<Context, long> requestFtn = context =>
             {
@@ -233,7 +232,7 @@ namespace Intuit.Tax.DataProvider
                 bool result = transaction.Execute();
                 if (!result)
                 {
-                    throw new MemoryDBTransactionFailureException(
+                    throw new Exception(
                         string.Format("Message=\"Unable to complete ClearFile transaction\" DocKey={0} HashKey={1} ModifiedKey={2} LengthKey={3}",
                                     docKey, hashKey, modifiedKey, lengthKey));
                 }
@@ -254,7 +253,7 @@ namespace Intuit.Tax.DataProvider
             });
         }
 
-        public override bool ClearModifiedGroupEntitiesList(string authId, string moduleName, string projectName)
+        public bool ClearModifiedGroupEntitiesList(string authId, string moduleName, string projectName)
         {
             Func<Context, bool> requestFtn = context =>
             {
@@ -276,15 +275,15 @@ namespace Intuit.Tax.DataProvider
             });
         }
 
-        public override void CreateOrOpenFile(string authId, string projectName, string moduleName, bool allowSyncWithReadOnlyDatabase = true)
+        public void CreateOrOpenFile(string authId, string projectName, string moduleName, bool allowSyncWithReadOnlyDatabase = true)
         { }
 
-        public override void DeleteFile(string authId, string moduleName, string projectName)
+        public void DeleteFile(string authId, string moduleName, string projectName)
         {
             ClearFile(authId, moduleName, projectName);
         }
 
-        public override bool Exists(string authId, string moduleName, string projectName)
+        public bool Exists(string authId, string moduleName, string projectName)
         {
             Func<Context, bool> requestFtn = context =>
             {
@@ -306,15 +305,15 @@ namespace Intuit.Tax.DataProvider
             });
         }
 
-        public override bool GetLastOpenProjectDate(string authId, string projectName, string moduleName, out SqlDateTime dateTime)
+        public bool GetLastOpenProjectDate(string authId, string projectName, string moduleName, out SqlDateTime dateTime)
         {
             dateTime = DateTime.Now;
             return false;
         }
 
-        public override ModifiedGroupEntitiesState GetModifiedGroupEntitiesState(string authId, string moduleName, string projectName)
+        public ModifiedGroupEntitiesState GetModifiedGroupEntitiesState(string authId, string moduleName, string projectName)
         {
-            var debug = MemoryDBBaseSettings.LuaDebug;
+            var debug = true;
             var lengthKey = GetLengthGroupHashKey(authId, moduleName, projectName);
             var hashKey = GetHashGroupHashKey(authId, moduleName, projectName);
 
@@ -343,7 +342,7 @@ namespace Intuit.Tax.DataProvider
                 || (!scriptResult.ToString().EndsWith("}"))
                 )
             {
-                throw new MemoryDBLuaScriptFailureException("Error during REDIS script -- " + scriptResult.ToString());
+                throw new Exception("Error during REDIS script -- " + scriptResult.ToString());
             }
 
             JObject json = JObject.Parse(scriptResult.ToString());
@@ -384,75 +383,18 @@ namespace Intuit.Tax.DataProvider
             }
 
             var modifiedGroupEntitiesList = DeserializeGroups(groupsData);
-            var trulyModifiedGroupEntitiesList = new List<GroupEntity>();
+            var trulyModifiedGroupEntitiesList = new List<string>();
 
-            // get the list of associated group sizes.
-            // if the size is different, we know it's truly modified
-            // if the size is the same, we can't be sure, and therefore we will hash it
-            // and compare to the hash
-            foreach (var groupEntity in modifiedGroupEntitiesList)
-            {
-                // get the current length+hash - we'll need them regardless since we have to store them
-                var currentGroupLength = groupEntity.GroupDataLength;
-                var currentGroupHash = groupEntity.GroupDataHash(currentGroupLength);
-
-                // parse the 2 attributes out, since we'll use them twice
-                var xmlGroupName = groupEntity.GroupData.Attribute(XmlGroupConstants.XML_GROUP_NAME).Value;
-                var xmlGroupInstance = groupEntity.GroupData.Attribute(XmlGroupConstants.XML_GROUP_INSTANCE).Value;
-
-                // build 2 keys to store
-                var groupEntityIdentifier = BuildDocumentGroupEntityIdentifier(xmlGroupName, xmlGroupInstance);
-
-                // if the entity is actually modified, then add it to the list, and update the length / hashes for future checks
-                if (IsEntityModified(currentGroupLength, currentGroupHash, groupEntityIdentifier, groupSizes, groupHashes))
-                {
-                    trulyModifiedGroupEntitiesList.Add(groupEntity);
-                    groupSizes[groupEntityIdentifier] = currentGroupLength;
-                    groupHashes[groupEntityIdentifier] = currentGroupHash;
-                }
-            }
 
             return new MemoryDBModifiedGroupEntitiesState(trulyModifiedGroupEntitiesList, lengthKey, groupSizes, hashKey, groupHashes);
         }
 
-        public override IList<string> ListFiles(string authId, string moduleName, bool skipDeleted)
+        public IList<string> ListFiles(string authId, string moduleName, bool skipDeleted)
         {
             return null;
         }
 
-        public override IEnumerable<GroupEntity> ReadBatchData(string authId, string moduleName, string projectName, XElement requestData)
-        {
-            var groupIds = new List<RedisValue>();
-            var groups = from g in requestData.Descendants(XmlGroupConstants.XML_GROUP) select g;
-            // for each group
-            foreach (var group in groups)
-            {
-                // grab the group name and instance from the attributes
-                var groupName = group.Attribute(XmlGroupConstants.XML_GROUP_NAME).Value;
-                var instance = group.Attribute(XmlGroupConstants.XML_GROUP_INSTANCE).Value;
-
-                // add to the list of group keys
-                groupIds.Add(BuildDocumentGroupEntityIdentifier(groupName, instance));
-            }
-
-            var documentKey = GetDocumentKey(authId, moduleName, projectName);
-            return GetGroups(documentKey, groupIds);
-        }
-
-        public override GroupEntity ReadData(string authId, string moduleName, string projectName, string groupName, string instance)
-        {
-            var groupTree = new XElement(XmlGroupConstants.XML_GROUPS);
-
-            var groupXElement = new XElement(XmlGroupConstants.XML_GROUP);
-            groupXElement.SetAttributeValue(XmlGroupConstants.XML_GROUP_NAME, groupName);
-            groupXElement.SetAttributeValue(XmlGroupConstants.XML_GROUP_INSTANCE, instance);
-
-            groupTree.Add(groupXElement);
-
-            return ReadBatchData(authId, moduleName, projectName, groupTree).SingleOrDefault();
-        }
-
-        public override IEnumerable<GroupEntity> ReadFile(string authId, string projectName, string moduleName, bool forceReadFromDatabase)
+        public IEnumerable<string> ReadFile(string authId, string projectName, string moduleName, bool forceReadFromDatabase)
         {
             Func<Context, RedisValue[]> requestFtn = context =>
             {
@@ -475,18 +417,17 @@ namespace Intuit.Tax.DataProvider
 
             // Convert from base64, and decrypt all the desired groups
             var encryptedGroups = results.Select(encodedEntity => Convert.FromBase64String(encodedEntity.ToString()));
-            var encodedGroups = iEncryptor.decryptAll(MemoryDBEncryptionUtil.getKeyName(), encryptedGroups.ToList());
 
             // finally, deserialize the data back into GroupEntities
-            return encodedGroups.Select(encodedGroup => {
-                return ZeroFormatterSerializer.Deserialize<GroupEntity>(encodedGroup);
+            return encryptedGroups.Select(encryptedGroup => {
+                return ZeroFormatterSerializer.Deserialize<string>(encryptedGroup);
             });
         }
 
-        public override void ReEncryptProject(string authId, string moduleName, string projectName)
+        public void ReEncryptProject(string authId, string moduleName, string projectName)
         { }
 
-        public override void Reset(ModifiedGroupEntitiesState state)
+        public void Reset(ModifiedGroupEntitiesState state)
         {
             Func<Context, long> requestFtn = context =>
             {
@@ -496,6 +437,22 @@ namespace Intuit.Tax.DataProvider
                 var modifiedState = context["modifiedState"] as MemoryDBModifiedGroupEntitiesState;
 
                 var transaction = this.GetInstance().GetDatabase().CreateTransaction();
+
+                //var hashResult = transaction.HashSetAsync(modifiedState.GetHashDocumentKey(),
+                //    modifiedState.GetHashDocument()
+                //    .Select(pair => new HashEntry(pair.Key, pair.Value))
+                //    .ToArray());
+
+                //var lengthResult = transaction.HashSetAsync(modifiedState.GetLengthDocumentKey(),
+                //    modifiedState.GetLengthDocument()
+                //    .Select(pair => new HashEntry(pair.Key, pair.Value))
+                //    .ToArray());
+
+                //if (dataCacheEnableExpiryCheck)
+                //{
+                //    transaction.KeyExpireAsync(modifiedState.GetHashDocumentKey(), TimeSpan.FromSeconds(dataCacheItemExpirySeconds));
+                //    transaction.KeyExpireAsync(modifiedState.GetLengthDocumentKey(), TimeSpan.FromSeconds(dataCacheItemExpirySeconds));
+                //}
 
                 var hashResult = transaction.HashSetAsync(modifiedState.GetHashDocumentKey(),
                     modifiedState.GetHashDocument()
@@ -516,7 +473,7 @@ namespace Intuit.Tax.DataProvider
                 bool result = transaction.Execute();
                 if (!result)
                 {
-                    throw new MemoryDBTransactionFailureException(
+                    throw new Exception(
                         string.Format("Message=\"Unable to complete Reset transaction\""));
                 }
 
@@ -532,24 +489,24 @@ namespace Intuit.Tax.DataProvider
             });
         }
 
-        public override void SyncUser(string authId, string projectName, string moduleName, ref bool copyRequested, string callerIdentifier = null)
+        public void SyncUser(string authId, string projectName, string moduleName, ref bool copyRequested, string callerIdentifier = null)
         {
             copyRequested = false;
         }
 
-        public override long WriteData(string authId, string moduleName, string projectName, GroupEntity groupEntity, bool forceExistingDataSync = false)
+        public long WriteData(string authId, string moduleName, string projectName, string groupEntity, bool forceExistingDataSync = false)
         {
-            WriteData(authId, moduleName, projectName, new List<GroupEntity> { groupEntity }, forceExistingDataSync);
+            WriteData(authId, moduleName, projectName, new List<string> { groupEntity }, forceExistingDataSync);
             return 0L;
         }
 
-        public override void WriteData(string authId, string moduleName, string projectName, IEnumerable<GroupEntity> groupEntities, bool forceExistingDataSync = false, bool allGroups = false)
+        public void WriteData(string authId, string moduleName, string projectName, IEnumerable<string> groupEntities, bool forceExistingDataSync = false, bool allGroups = false)
         {
             // shortcut if empty
             if (!groupEntities.Any())
                 return;
 
-            var debug = MemoryDBBaseSettings.LuaDebug;
+            var debug = true;
 
             Func<Context, RedisResult> requestFtn = context =>
             {
@@ -576,7 +533,7 @@ namespace Intuit.Tax.DataProvider
                 || (debug && !scriptResult.ToString().Contains("\"status\":\"OK\""))
                 )
             {
-                throw new MemoryDBLuaScriptFailureException("Error during REDIS script -- " + scriptResult.ToString());
+                throw new Exception("Error during REDIS script -- " + scriptResult.ToString());
             }
 
             if (debug && logger.IsDebugEnabled)
@@ -585,7 +542,7 @@ namespace Intuit.Tax.DataProvider
             }
         }
 
-        private dynamic GetWriteDataScript(string authId, string moduleName, string projectName, IEnumerable<GroupEntity> groupEntities, bool forceExistingDataSync, bool debug)
+        private dynamic GetWriteDataScript(string authId, string moduleName, string projectName, IEnumerable<string> groupEntities, bool forceExistingDataSync, bool debug)
         {
             // keys: doc, modified
             var keys = new List<RedisKey>();
@@ -604,12 +561,11 @@ namespace Intuit.Tax.DataProvider
             foreach (var groupEntityToStore in groupEntities)
             {
                 var serializedEntity = ZeroFormatterSerializer.Serialize(groupEntityToStore);
-                var identifer = BuildDocumentGroupEntityIdentifier(groupEntityToStore.Name, groupEntityToStore.Client); ;
-                sortedList.Add(identifer, serializedEntity);
+                sortedList.Add(groupEntityToStore, serializedEntity);
             }
 
             // encrypt all the group data values to be updated
-            var encryptedValues = iEncryptor.encryptAll(MemoryDBEncryptionUtil.getKeyName(), MemoryDBEncryptionUtil.getSeed(), sortedList.Values.ToList());
+            var encryptedValues = string.Join("",sortedList.Keys.ToArray());
 
             // update the full document with the newly encoded and encrypted group data
             var groupKeys = sortedList.Keys;
@@ -617,7 +573,7 @@ namespace Intuit.Tax.DataProvider
             {
                 var key = groupKeys[i];
                 values.Add(key);
-                values.Add(Convert.ToBase64String(encryptedValues[i]));
+                values.Add(Convert.ToBase64String(sortedList.Values[i]));
             }
 
             return new
@@ -649,12 +605,12 @@ namespace Intuit.Tax.DataProvider
             };
         }
 
-        public override bool IsCachingEnabled()
+        public bool IsCachingEnabled()
         {
             return true;
         }
 
-        public override bool SupportsCaching()
+        public bool SupportsCaching()
         {
             return true;
         }
@@ -686,18 +642,18 @@ namespace Intuit.Tax.DataProvider
         }
 
         /// <summary>
-        /// Build a GroupEntityKey
+        /// Build a stringKey
         /// </summary>
         /// <param name="groupName"></param>
         /// <param name="instance"></param>
         /// <returns></returns>
-        private static string BuildDocumentGroupEntityIdentifier(string groupName, string instance)
+        private static string BuildDocumentstringIdentifier(string groupName, string instance)
         {
             return string.Format("{0}|{1}", groupName, instance);
         }
 
         /// <summary>
-        /// Build a GroupEntitySizeKey
+        /// Build a stringSizeKey
         /// </summary>
         /// <param name="groupName"></param>
         /// <param name="instance"></param>
@@ -708,7 +664,7 @@ namespace Intuit.Tax.DataProvider
         }
 
         /// <summary>
-        /// Build a GroupEntityHashKey
+        /// Build a stringHashKey
         /// </summary>
         /// <param name="authId"></param>
         /// <param name="moduleName"></param>
@@ -721,7 +677,7 @@ namespace Intuit.Tax.DataProvider
             return string.Format("{0}|hash", GetKeyBase(authId, moduleName, fileName));
         }
 
-        private IEnumerable<GroupEntity> GetGroups(string documentKey, List<RedisValue> groupIdentifiers)
+        private IEnumerable<object> GetGroups(string documentKey, List<RedisValue> groupIdentifiers)
         {
             Func<Context, RedisValue[]> requestFtn = context =>
             {
@@ -752,16 +708,13 @@ namespace Intuit.Tax.DataProvider
             return DeserializeGroups(groupDataList);
         }
 
-        private IEnumerable<GroupEntity> DeserializeGroups(List<string> groupDataList)
+        private IEnumerable<byte[]> DeserializeGroups(List<string> groupDataList)
         {
             // Convert from base64, and decrypt all the desired groups
             var encryptedGroups = groupDataList.Select(encodedEntity => Convert.FromBase64String(encodedEntity));
-            var encodedGroups = iEncryptor.decryptAll(MemoryDBEncryptionUtil.getKeyName(), encryptedGroups.ToList());
 
-            // finally, deserialize the data back into GroupEntities
-            return encodedGroups.Select(encodedGroup => {
-                return ZeroFormatterSerializer.Deserialize<GroupEntity>(encodedGroup);
-            });
+
+            return encryptedGroups;
         }
 
         /// <summary>
@@ -809,11 +762,10 @@ namespace Intuit.Tax.DataProvider
 
         private static RetryPolicy<T> CreateRetryPolicy<T>()
         {
-            return Policy
-                 .Handle<RedisTimeoutException>()
-                 .Or<RedisConnectionException>()
-                 .OrResult<T>(obj => false)
-                 .WaitAndRetry(MemoryDBBaseSettings.RetryConnectionFailuresDelaysInMs, (result, timespan, retry, context) =>
+            var a = Policy.Handle<RedisTimeoutException>();
+            var b = a.Or<RedisConnectionException>();
+            var c = b.OrResult<T>(obj => false);
+            return c.WaitAndRetry(3, (_)=>TimeSpan.FromMilliseconds(500), (result, timespan, retry, context) =>
                  {
                      logger.Warn("Connection exception... Retry=" + retry + " Result=" + result.Result, result.Exception);
                  });
@@ -821,26 +773,126 @@ namespace Intuit.Tax.DataProvider
 
         private static string GetWriteModifiedAttributesDataLuaScript()
         {
-            return GetEmbeddedLuaScript("GetModifiedGroups.lua");
+            return @"-- setup variables from start of ARGV
+local logtable = { }
+local expirySeconds = tonumber(ARGV[1])
+local isExpiryEnabled = expirySeconds ~= -1
+local forcedDataSync = ARGV[2] == ""True""
+local isDebug = ARGV[3] == ""True""
+logtable['expirySeconds'] = expirySeconds
+logtable['isExpiryEnabled'] = isExpiryEnabled
+logtable['forcedDataSync'] = forcedDataSync
+logtable['forcedDataSyncSkip'] = -1
+
+
+local groupsUpdateArray = { }
+local modifiedIds = { }
+--the rest of ARGV are the data group to be written; convert to a name-value table
+for i = 4, #ARGV, 2 do
+    local field = ARGV[i]
+    local data = ARGV[i + 1]
+    repeat
+        -- if forced data sync, then don't add new entries
+        if forcedDataSync then
+            if redis.call('HEXISTS', KEYS[1], field) == 0 then
+                logtable['forcedDataSyncSkip'] = logtable['forcedDataSyncSkip'] + 1
+                break
+            end
+        end
+        table.insert(groupsUpdateArray, field);
+            table.insert(groupsUpdateArray, data);
+            table.insert(modifiedIds, field);
+
+            until true
+end
+local updateResults = { }
+            --add to the hashmap
+           updateResults[KEYS[1]] = redis.call('HSET', KEYS[1], unpack(groupsUpdateArray))
+           -- add to modified set
+updateResults[KEYS[2]] = redis.call('SADD', KEYS[2], unpack(modifiedIds))
+logtable['updateResults'] = updateResults
+if (isExpiryEnabled) then
+     logtable[KEYS[1]..'.EXPIRE'] = redis.call('EXPIRE', KEYS[1], expirySeconds)
+    logtable[KEYS[2]..'.EXPIRE'] = redis.call('EXPIRE', KEYS[2], expirySeconds)
+end
+if (isDebug) then
+     logtable['status'] = 'OK'
+    return cjson.encode(logtable)
+end
+return 'OK'";
         }
 
         private static string GetWriteGroupsLuaScript()
         {
-            return GetEmbeddedLuaScript("WriteGroupsScript.lua");
-        }
+            return @"-- setup variables from start of ARGV
+local logtable = {}
+local isDebug = ARGV[1] == ""True""
+local groupResultData = { }
 
-        private static string GetEmbeddedLuaScript(string name)
-        {
-            var assembly = Assembly.GetExecutingAssembly();
-            var resourceName = "MemoryDBDataProvider." + name;
 
-            using (Stream stream = assembly.GetManifestResourceStream(resourceName))
-            using (StreamReader reader = new StreamReader(stream))
-            {
-                return reader.ReadToEnd();
-            }
+local modifiedGroupNames = redis.call('SMEMBERS', KEYS[4])
+if(#modifiedGroupNames == 0) then
+    return cjson.encode(groupResultData)
+end
+local groupHashesArray = redis.call('HGETALL', KEYS[3])
+local groupHashes = { }
+for i = 1, #groupHashesArray, 2 do
+    groupHashes[groupHashesArray[i]] = groupHashesArray[i + 1]
+end
+local groupLengthsArray = redis.call('HGETALL', KEYS[2])
+local groupLengths = { }
+for i = 1, #groupLengthsArray, 2 do
+    groupLengths[groupLengthsArray[i]] = groupLengthsArray[i + 1]
+end
+local groups = redis.call('HMGET', KEYS[1], unpack(modifiedGroupNames))
+local groupsArray = { }
+-- the rest of ARGV are the data group to be written; convert to a name-value table
+for i=1, #modifiedGroupNames, 1 do
+    local groupId = modifiedGroupNames[i]
+    local groupLength = groupLengths[groupId]
+    local groupHash = groupHashes[groupId]
+    local groupData = groups[i]
+    groupsArray[i] = { length = groupLength, hash = groupHash, group = groupData, id=groupId
+    }
+    end
+    groupResultData['modifiedGroups'] = groupsArray
+if(isDebug) then
+    groupResultData['debug'] = logtable
+end
+return cjson.encode(groupResultData)"; ;
         }
 
         #endregion
+    }
+
+    public class ModifiedGroupEntitiesState
+    {
+    }
+
+    internal class MemoryDBModifiedGroupEntitiesState : ModifiedGroupEntitiesState
+    {
+        private List<string> trulyModifiedGroupEntitiesList;
+        private string lengthKey;
+        private Dictionary<string, int> groupSizes;
+        private string hashKey;
+        private Dictionary<string, string> groupHashes;
+
+        public MemoryDBModifiedGroupEntitiesState()
+        {
+        }
+
+        public MemoryDBModifiedGroupEntitiesState(List<string> trulyModifiedGroupEntitiesList, string lengthKey, Dictionary<string, int> groupSizes, string hashKey, Dictionary<string, string> groupHashes)
+        {
+            this.trulyModifiedGroupEntitiesList = trulyModifiedGroupEntitiesList;
+            this.lengthKey = lengthKey;
+            this.groupSizes = groupSizes;
+            this.hashKey = hashKey;
+            this.groupHashes = groupHashes;
+        }
+
+        internal IEnumerable<KeyValuePair<string, string>> GetHashDocument() => throw new NotImplementedException();
+        internal RedisKey GetHashDocumentKey() => throw new NotImplementedException();
+        internal IEnumerable<KeyValuePair<string, string>> GetLengthDocument() => throw new NotImplementedException();
+        internal RedisKey GetLengthDocumentKey() => throw new NotImplementedException();
     }
 }
