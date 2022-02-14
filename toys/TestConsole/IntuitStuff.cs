@@ -664,7 +664,7 @@ namespace Intuit.Tax.DataProvider
             return string.Format("{0}|hash", GetKeyBase(authId, moduleName, fileName));
         }
 
-        private IEnumerable<object> GetGroups(string documentKey, List<RedisValue> groupIdentifiers)
+        public IEnumerable<object> GetGroups(string documentKey, List<RedisValue> groupIdentifiers)
         {
             Func<Context, RedisValue[]> requestFtn = context =>
             {
@@ -757,8 +757,8 @@ namespace Intuit.Tax.DataProvider
                      logger.Warn("Connection exception... Retry=" + retry + " Result=" + result.Result, result.Exception);
                  });
         }
-
-        private static string GetWriteModifiedAttributesDataLuaScript()
+        
+        private static string GetWriteGroupsLuaScript()
         {
             return @"-- setup variables from start of ARGV
 local logtable = { }
@@ -809,7 +809,7 @@ end
 return 'OK'";
         }
 
-        private static string GetWriteGroupsLuaScript()
+        private static string GetWriteModifiedAttributesDataLuaScript()
         {
             return @"-- setup variables from start of ARGV
 local logtable = {}

@@ -290,15 +290,13 @@ return cjson.encode(groupResultData)";
             db.StringSet("Ahoy", "Matey");
             Console.WriteLine(db.StringGet("Ahoy"));
 
-            var scriptResult = runWriteScript(db, 0);
-            Console.WriteLine("Result: " + scriptResult.ToString());
-
             //massiveCalls(options(memorydbServer));
             intuitMassiveCalls();
         }
 
         private static void intuitMassiveCalls()
         {
+            Console.WriteLine("pre start");
             var cacheProvider = new MemoryDBDataCacheProvider(50, true);
             IntRange writeRange = new IntRange(0, 2);
             IntRange simpleWriteRange = new IntRange(writeRange.end(), 3);
@@ -306,11 +304,18 @@ return cjson.encode(groupResultData)";
             IntRange keyExpireTransaction = new IntRange(readRange.end(), 1);
             IntRange keyDeleteTransaction = new IntRange(keyExpireTransaction.end(), 1);
 
+            Console.WriteLine("start");
+            Console.WriteLine("ClearModifiedGroupEntitiesList");
+            cacheProvider.AddOpenProjectHistory("foo", "bar", "baz", true);
+            Console.WriteLine("AddOpenProjectHistory");
+            Console.WriteLine("WriteData");
+
             List<Thread> list = new List<Thread>();
             for (int i = 0; i < 30; i++)
             {
                 var j = i;
-                var t = new Thread(() => {
+                var t = new Thread(() =>
+                {
                     try
                     {
                         for (var counter = 0; counter < 1000; counter++)
@@ -320,42 +325,43 @@ return cjson.encode(groupResultData)";
                             {
                                 if (counter % 10 == 0)
                                 {
-                                    Console.WriteLine($"write script {j} - {counter}");
+                                    Console.WriteLine($"ReadFile {j} - {counter}");
                                 }
-                                runWriteScript(db, j);
+                                cacheProvider.ReadFile("foo", "bar", "baz", true);
                             }
                             else if (simpleWriteRange.inRange(randomCoinToss))
                             {
                                 if (counter % 10 == 0)
                                 {
-                                    Console.WriteLine($"set add {j} - {counter}");
+                                    Console.WriteLine($"GetGroups {j} - {counter}");
                                 }
-                                db.SetAdd(writeKeys[0], new RedisValue(j.ToString()));
-                                db.SetAdd(writeKeys[1], new RedisValue(j.ToString()));
+                                cacheProvider.GetGroups("doc", new List<RedisValue> { "foo", "bar", "baz" });
                             }
                             else if (readRange.inRange(randomCoinToss))
                             {
                                 if (counter % 10 == 0)
                                 {
-                                    Console.WriteLine($"read script {j} - {counter}");
+                                    Console.WriteLine($"GetModifiedGroupEntitiesState {j} - {counter}");
                                 }
-                                runReadScript(db, j);
+                                cacheProvider.GetModifiedGroupEntitiesState("foo", "bar", "baz");
                             }
                             else if (keyExpireTransaction.inRange(randomCoinToss))
                             {
                                 if (counter % 10 == 0)
                                 {
-                                    Console.WriteLine($"key expire {j} - {counter}");
+                                    Console.WriteLine($"WriteData {j} - {counter}");
                                 }
-                                performKeyExpireTransaction(db, j);
+
+                                cacheProvider.WriteData("foo", "bar", "baz", "group");
                             }
                             else
                             {
                                 if (counter % 10 == 0)
                                 {
-                                    Console.WriteLine($"key delete {j} - {counter}");
+                                    Console.WriteLine($"ClearModifiedGroupEntitiesList {j} - {counter}");
                                 }
-                                performKeyDeleteTransaction(db, j);
+
+                                cacheProvider.ClearModifiedGroupEntitiesList("foo", "bar", "baz");
                             }
                         }
                     }
