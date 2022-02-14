@@ -157,24 +157,6 @@ return cjson.encode(groupResultData)";
             }
         }
 
-        private static ConfigurationOptions options(string server)
-        {
-            var timeout = 5000;
-            var options = ConfigurationOptions.Parse(server);
-
-            options.ReconnectRetryPolicy = new LinearRetry(500);
-            options.AbortOnConnectFail = false;
-            options.ConfigCheckSeconds = 120;
-            options.HighPrioritySocketThreads = true;
-            options.Ssl = true;
-            options.SslProtocols = SslProtocols.Tls12;
-
-            options.AsyncTimeout = timeout;
-            options.ConnectTimeout = timeout;
-            options.SyncTimeout = timeout;
-            return options;
-        }
-
         private static void massiveCalls(ConfigurationOptions options)
         {
             IntRange writeRange = new IntRange(0, 2);
@@ -276,23 +258,29 @@ return cjson.encode(groupResultData)";
             bool result = transaction.Execute();
         }
 
+        private static ConfigurationOptions options()
+        {
+            var options = new ConfigurationOptions { 
+            };
+            options.EndPoints.Add("ser-test-001.zww8pv.0001.use1.cache.amazonaws.com", 6379);
+            options.EndPoints.Add("ser-test-002.zww8pv.0001.use1.cache.amazonaws.com", 6379);
+            options.EndPoints.Add("ser-test-003.zww8pv.0001.use1.cache.amazonaws.com", 6379);
+            options.EndPoints.Add("ser-test-004.zww8pv.0001.use1.cache.amazonaws.com", 6379);
+            options.EndPoints.Add("ser-test-005.zww8pv.0001.use1.cache.amazonaws.com", 6379);
+            return options;
+        }
+
         public static void Main()
         {
-#pragma warning disable CS0219 // Variable is assigned but its value is never used
-            var redisServer = "clustercfg.shachlan-se-test-devo.sstwrm.use1devo.elmo-dev.amazonaws.com:6379";
-            var memorydbServer = "clustercfg.stack-exchange-test-memorydb.sstwrm.memorydb-devo.us-east-1.amazonaws.com:6379";
-#pragma warning restore CS0219 // Variable is assigned but its value is never used
-            var client = ConnectionMultiplexer.Connect(options(redisServer));
-            //var client = ConnectionMultiplexer.Connect("stack-exchange-test-no-tls.4l6gyg.clustercfg.memorydb.eu-west-1.amazonaws.com");
-            client.GetDatabase().Ping();
-            var db = client.GetDatabase();
-            db.StringSet("Ahoy", "Matey");
-            Console.WriteLine(db.StringGet("Ahoy"));
-
-            var scriptResult = runWriteScript(db, 0);
-            Console.WriteLine("Result: " + scriptResult.ToString());
-
-            massiveCalls(options(memorydbServer));
+            using (var client = ConnectionMultiplexer.Connect(options()))
+            {
+                var db = client.GetDatabase();
+                for (int i = 0; i < 200000; i++)
+                {
+                    db.StringSet("Ahoy", "Matey" + i);
+                    Console.WriteLine(db.StringGet("Ahoy", CommandFlags.DemandReplica));
+                }
+            }
         }
     }
 }
