@@ -60,17 +60,6 @@ namespace Intuit.Tax.DataProvider
         private bool dataCacheEnableExpiryCheck;
 
         /// <summary>
-        /// General Constructor
-        /// </summary>
-        /// <param name="dataCacheItemExpirySeconds">Time expiry in seconds</param>
-        /// <param name="dataCacheEnableExpiryCheck">Is expiry disabled</param>
-        /// <param name="iEncryptor">The encryptor used for encrypting data</param>
-        /// <param name="secretAccessor">Used to access secrets</param>
-        public MemoryDBDataCacheProvider(int dataCacheItemExpirySeconds, bool dataCacheEnableExpiryCheck)
-        : this(dataCacheItemExpirySeconds, dataCacheEnableExpiryCheck, null)
-        { }
-
-        /// <summary>
         /// 
         /// </summary>
         /// <param name="dataCacheItemExpirySeconds">Time expiry in seconds</param>
@@ -78,19 +67,10 @@ namespace Intuit.Tax.DataProvider
         /// <param name="iEncryptor">The encryptor used for encrypting data</param>
         /// <param name="secretAccessor">Used to access secrets</param>
         /// <param name="connection">MemoryDB Multiplexer</param>
-        public MemoryDBDataCacheProvider(int dataCacheItemExpirySeconds, bool dataCacheEnableExpiryCheck, ConnectionMultiplexer connection)
+        public MemoryDBDataCacheProvider(int dataCacheItemExpirySeconds, bool dataCacheEnableExpiryCheck)
         {
             this.dataCacheItemExpirySeconds = dataCacheItemExpirySeconds;
             this.dataCacheEnableExpiryCheck = dataCacheEnableExpiryCheck;
-
-            // Check if the singleton instance has been created
-            //if (connection == null)
-            //{
-            //    this.connection = GetInstance();
-            //} else
-            //{
-            //    this.connection = connection;
-            //}
         }
 
         /// <summary>
@@ -322,7 +302,7 @@ namespace Intuit.Tax.DataProvider
                 var timer = new Stopwatch();
                 timer.Start();
 
-                var script = context["script"] as dynamic;
+                ContextClass script = context["script"] as ContextClass;
                 var response = this.GetInstance().GetDatabase().ScriptEvaluate(script.script, script.keys, script.values);
 
                 timer.Stop();
@@ -513,7 +493,7 @@ namespace Intuit.Tax.DataProvider
                 var timer = new Stopwatch();
                 timer.Start();
 
-                var script = context["script"] as dynamic;
+                var script = context["script"] as ContextClass;
                 var response = this.GetInstance().GetDatabase().ScriptEvaluate(script.script, script.keys, script.values);
 
                 timer.Stop();
@@ -542,7 +522,7 @@ namespace Intuit.Tax.DataProvider
             }
         }
 
-        private dynamic GetWriteDataScript(string authId, string moduleName, string projectName, IEnumerable<string> groupEntities, bool forceExistingDataSync, bool debug)
+        private ContextClass GetWriteDataScript(string authId, string moduleName, string projectName, IEnumerable<string> groupEntities, bool forceExistingDataSync, bool debug)
         {
             // keys: doc, modified
             var keys = new List<RedisKey>();
@@ -576,7 +556,7 @@ namespace Intuit.Tax.DataProvider
                 values.Add(Convert.ToBase64String(sortedList.Values[i]));
             }
 
-            return new
+            return new ContextClass
             {
                 script = WRITE_GROUPS_LUA_SCRIPT,
                 keys = keys.ToArray(),
@@ -584,7 +564,14 @@ namespace Intuit.Tax.DataProvider
             };
         }
 
-        private dynamic GetWriteModifiedAttributesDataScript(string authId, string moduleName, string projectName, string lengthKey, string hashKey, bool debug)
+        private class ContextClass
+        {
+            public RedisKey[] keys;
+            public RedisValue[] values;
+            public string script;
+        }
+
+        private ContextClass GetWriteModifiedAttributesDataScript(string authId, string moduleName, string projectName, string lengthKey, string hashKey, bool debug)
         {
             // keys: doc, size, hash, modified
             var keys = new List<RedisKey>();
@@ -597,7 +584,7 @@ namespace Intuit.Tax.DataProvider
             var values = new List<RedisValue>();
             values.Add(debug.ToString());
 
-            return new
+            return new ContextClass
             {
                 script = MODIFIED_GROUPS_GET_LUA_SCRIPT,
                 keys = keys.ToArray(),
@@ -890,9 +877,17 @@ return cjson.encode(groupResultData)"; ;
             this.groupHashes = groupHashes;
         }
 
-        internal IEnumerable<KeyValuePair<string, string>> GetHashDocument() => throw new NotImplementedException();
-        internal RedisKey GetHashDocumentKey() => throw new NotImplementedException();
-        internal IEnumerable<KeyValuePair<string, string>> GetLengthDocument() => throw new NotImplementedException();
-        internal RedisKey GetLengthDocumentKey() => throw new NotImplementedException();
+        internal IEnumerable<KeyValuePair<string, string>> GetHashDocument() => new List<KeyValuePair<string, string>>
+        {
+            new KeyValuePair<string, string>("HashKey", "HashValue" ),
+            new KeyValuePair<string, string>("otherKey", "otherValue" ),
+        };
+        internal RedisKey GetHashDocumentKey() => "HashKey";
+        internal IEnumerable<KeyValuePair<string, string>> GetLengthDocument() => new List<KeyValuePair<string, string>>
+        {
+            new KeyValuePair<string, string>("LengthKey", "LengthValue" ),
+            new KeyValuePair<string, string>("otherKey", "otherValue" ),
+        };
+        internal RedisKey GetLengthDocumentKey() => "LengthKey";
     }
 }

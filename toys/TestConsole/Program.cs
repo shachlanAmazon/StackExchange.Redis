@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Authentication;
 using System.Threading;
 using System.Threading.Tasks;
+using Intuit.Tax.DataProvider;
 using StackExchange.Redis;
 
 namespace TestConsole
@@ -292,7 +293,84 @@ return cjson.encode(groupResultData)";
             var scriptResult = runWriteScript(db, 0);
             Console.WriteLine("Result: " + scriptResult.ToString());
 
-            massiveCalls(options(memorydbServer));
+            //massiveCalls(options(memorydbServer));
+            intuitMassiveCalls();
+        }
+
+        private static void intuitMassiveCalls()
+        {
+            var cacheProvider = new MemoryDBDataCacheProvider(50, true);
+            IntRange writeRange = new IntRange(0, 2);
+            IntRange simpleWriteRange = new IntRange(writeRange.end(), 3);
+            IntRange readRange = new IntRange(simpleWriteRange.end(), 2);
+            IntRange keyExpireTransaction = new IntRange(readRange.end(), 1);
+            IntRange keyDeleteTransaction = new IntRange(keyExpireTransaction.end(), 1);
+
+            List<Thread> list = new List<Thread>();
+            for (int i = 0; i < 30; i++)
+            {
+                var j = i;
+                var t = new Thread(() => {
+                    try
+                    {
+                        for (var counter = 0; counter < 1000; counter++)
+                        {
+                            var randomCoinToss = random.Next(keyDeleteTransaction.end());
+                            if (writeRange.inRange(randomCoinToss))
+                            {
+                                if (counter % 10 == 0)
+                                {
+                                    Console.WriteLine($"write script {j} - {counter}");
+                                }
+                                runWriteScript(db, j);
+                            }
+                            else if (simpleWriteRange.inRange(randomCoinToss))
+                            {
+                                if (counter % 10 == 0)
+                                {
+                                    Console.WriteLine($"set add {j} - {counter}");
+                                }
+                                db.SetAdd(writeKeys[0], new RedisValue(j.ToString()));
+                                db.SetAdd(writeKeys[1], new RedisValue(j.ToString()));
+                            }
+                            else if (readRange.inRange(randomCoinToss))
+                            {
+                                if (counter % 10 == 0)
+                                {
+                                    Console.WriteLine($"read script {j} - {counter}");
+                                }
+                                runReadScript(db, j);
+                            }
+                            else if (keyExpireTransaction.inRange(randomCoinToss))
+                            {
+                                if (counter % 10 == 0)
+                                {
+                                    Console.WriteLine($"key expire {j} - {counter}");
+                                }
+                                performKeyExpireTransaction(db, j);
+                            }
+                            else
+                            {
+                                if (counter % 10 == 0)
+                                {
+                                    Console.WriteLine($"key delete {j} - {counter}");
+                                }
+                                performKeyDeleteTransaction(db, j);
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        Console.WriteLine("Closing " + j);
+                    }
+                });
+                list.Add(t);
+                t.Start();
+            }
+            foreach (var t in list)
+            {
+                t.Join();
+            }
         }
     }
 }
