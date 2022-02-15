@@ -305,10 +305,7 @@ return cjson.encode(groupResultData)";
             IntRange keyDeleteTransaction = new IntRange(keyExpireTransaction.end(), 1);
 
             Console.WriteLine("start");
-            Console.WriteLine("ClearModifiedGroupEntitiesList");
             cacheProvider.AddOpenProjectHistory("foo", "bar", "baz", true);
-            Console.WriteLine("AddOpenProjectHistory");
-            Console.WriteLine("WriteData");
 
             List<Thread> list = new List<Thread>();
             for (int i = 0; i < 30; i++)
@@ -318,7 +315,7 @@ return cjson.encode(groupResultData)";
                 {
                     try
                     {
-                        for (var counter = 0; counter < 1000; counter++)
+                        for (var counter = 0; counter < 10000; counter++)
                         {
                             var randomCoinToss = random.Next(keyDeleteTransaction.end());
                             if (writeRange.inRange(randomCoinToss))
@@ -351,8 +348,9 @@ return cjson.encode(groupResultData)";
                                 {
                                     Console.WriteLine($"WriteData {j} - {counter}");
                                 }
+                                var args = Enumerable.Concat<string>(firstValues, Enumerable.Range(0, 1500).Select(index => $"{valueHeader}-{index}-{j}"));
 
-                                cacheProvider.WriteData("foo", "bar", "baz", "group");
+                                cacheProvider.WriteData("foo", "bar", "baz", args);
                             }
                             else
                             {

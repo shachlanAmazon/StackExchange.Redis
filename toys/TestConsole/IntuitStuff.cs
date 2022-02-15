@@ -574,11 +574,7 @@ namespace Intuit.Tax.DataProvider
         private ContextClass GetWriteModifiedAttributesDataScript(string authId, string moduleName, string projectName, string lengthKey, string hashKey, bool debug)
         {
             // keys: doc, size, hash, modified
-            var keys = new List<RedisKey>();
-            keys.Add(GetDocumentKey(authId, moduleName, projectName));
-            keys.Add(lengthKey);
-            keys.Add(hashKey);
-            keys.Add(GetModifiedGroupSetKey(authId, moduleName, projectName));
+            var keys = new[] { "{node}/a", "'{node}/b", "'{node}/c", "'{node}/secondKey", "'{node}/firstKey" }.Select(key => new RedisKey(key)).ToArray();
 
             // argvs: debug
             var values = new List<RedisValue>();
