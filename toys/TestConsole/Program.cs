@@ -314,90 +314,33 @@ return cjson.encode(groupResultData)";
 
         private static RedisResult runWriteScript(IDatabase db, int threadIndex)
         {
-          return db.ScriptEvaluate(writeScript, getWriteKeys(threadIndex + baseCounter), writeValues);
+            try
+            {
+                return db.ScriptEvaluate(writeScript, getWriteKeys(threadIndex + baseCounter), writeValues);
+            }
+            catch (Exception)
+            {
+                Console.WriteLine($"failed writing {threadIndex}");
+                throw;
+            }
         }
 
         private static RedisResult runReadScript(IDatabase db, int threadIndex)
         {
-            var args = new RedisValue[] { new RedisValue("True") };
-            return db.ScriptEvaluate(readScript, getReadKeys(baseCounter + threadIndex), args);
-        }
-
-        private static void massiveCalls(ConfigurationOptions options)
-        {
-            IntRange writeRange = new IntRange(0, 8);
-            IntRange hashGet = new IntRange(writeRange.end(), 8);
-            IntRange readRange = new IntRange(hashGet.end(), 1);
-            IntRange hashValues = new IntRange(readRange.end(), 8);
-
-            List<Thread> list = new List<Thread>();
-            for (int i = 0; i < 2000; i++)
+            try
             {
-                var j = i;
-                var t = new Thread(() =>
-                {
-                    try
-                    {
-                        for (var counter = 0; counter < 1000; counter++)
-                        {
-                            var db = GetInstance().GetDatabase();
-                            var randomCoinToss = random.Next(hashValues.end());
-                            if (writeRange.inRange(randomCoinToss))
-                            {
-                                //if (counter % 100 == 0)
-                                //{
-                                //    Console.WriteLine($"write script {j} - {counter}");
-                                //}
-                                runWriteScript(db, j);
-                            }
-                            else if (readRange.inRange(randomCoinToss))
-                            {
-                                //if (counter % 100 == 0)
-                                //{
-                                //    Console.WriteLine($"read script {j} - {counter}");
-                                //}
-                                runReadScript(db, j);
-                            }
-                            else if (hashGet.inRange(randomCoinToss))
-                            {
-                                //if (counter % 100 == 0)
-                                //{
-                                //    Console.WriteLine($"hash get {j} - {counter}");
-                                //}
-                                db.HashGet("doc", getReadKeys(baseCounter + j).Select(key => new RedisValue(key)).ToArray());
-                            }
-                            else
-                            {
-                                //if (counter % 100 == 0)
-                                //{
-                                //    Console.WriteLine($"hash values {j} - {counter}");
-                                //}
-                                db.HashValues(getDocKey(baseCounter + j));
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        if (ex.ToString().Contains("Timeout performing"))
-                        {
-                            Console.WriteLine("Caught " + ex);
-                        }
-                    }
-                });
-                list.Add(t);
-                t.Start();
+                var args = new RedisValue[] { new RedisValue("True") };
+                return db.ScriptEvaluate(readScript, getReadKeys(baseCounter + threadIndex), args);
             }
-            foreach (var t in list)
+            catch (Exception)
             {
-                t.Join();
+                throw;
             }
         }
 
-        private static List<ConnectionMultiplexer> INSTANCE_POOL;
-
-        private static ConfigurationOptions GetOptions(string server)
+        private static ConfigurationOptions options(string server)
         {
-            var timeout = 30000;
+            var timeout = 5000;
             var options = ConfigurationOptions.Parse(server);
 
             options.ReconnectRetryPolicy = new LinearRetry(500);
@@ -413,39 +356,77 @@ return cjson.encode(groupResultData)";
             return options;
         }
 
-        private static object lockObj = new();
-
-        private static ConnectionMultiplexer GetInstance()
+        private static void massiveCalls(ConfigurationOptions options)
         {
-            // double locking
-            if (INSTANCE_POOL == null)
+            IntRange writeRange = new IntRange(0, 8);
+            IntRange hashGet = new IntRange(writeRange.end(), 8);
+            IntRange readRange = new IntRange(hashGet.end(), 1);
+            IntRange hashValues = new IntRange(readRange.end(), 8);
+
+            List<Thread> list = new List<Thread>();
+            for (int i = 0; i < 2000; i++)
             {
-                var memorydbServer = "clustercfg.stack-exchange-test-memorydb.sstwrm.memorydb-devo.us-east-1.amazonaws.com:6379";
-                var options = GetOptions(memorydbServer);
-                lock (lockObj)
+                var j = i;
+                var t = new Thread(() =>
                 {
-                    if (INSTANCE_POOL == null)
+                    var writeFile = new StreamWriter($"c:\\textwriter{j}.txt");
+                    var conn = ConnectionMultiplexer.Connect(options, writeFile);
+                    var db = conn.GetDatabase();
+                    try
                     {
-                        // create instance
-                        //INSTANCE = CreateInstance();
-
-                        var pool = new List<ConnectionMultiplexer>();
-                        for (int i = 0; i < 30; i++)
+                        for (var counter = 0; counter < 1000; counter++)
                         {
-                            pool.Add(ConnectionMultiplexer.Connect(options));
+                            var randomCoinToss = random.Next(hashValues.end());
+                            if (writeRange.inRange(randomCoinToss))
+                            {
+                                //if (counter % 10 == 0)
+                                //{
+                                //    Console.WriteLine($"write script {j} - {counter}");
+                                //}
+                                runWriteScript(db, j);
+                            }
+                            else if (readRange.inRange(randomCoinToss))
+                            {
+                                //if (counter % 10 == 0)
+                                //{
+                                //    Console.WriteLine($"read script {j} - {counter}");
+                                //}
+                                runReadScript(db, j);
+                            }
+                            else if (hashGet.inRange(randomCoinToss))
+                            {
+                                //if (counter % 10 == 0)
+                                //{
+                                //    Console.WriteLine($"key expire {j} - {counter}");
+                                //}
+                                db.HashGet("doc", getReadKeys(baseCounter + j).Select(key => new RedisValue(key)).ToArray());
+                            }
+                            else
+                            {
+                                //if (counter % 10 == 0)
+                                //{
+                                //    Console.WriteLine($"key delete {j} - {counter}");
+                                //}
+                                db.HashValues(getDocKey(baseCounter + j));
+                            }
                         }
-
-                        INSTANCE_POOL = pool;
                     }
-                }
+                    finally
+                    {
+                        Console.WriteLine("Closing " + j);
+                        conn.Close();
+                        writeFile.Flush();
+                        writeFile.Close();
+
+                    }
+                });
+                list.Add(t);
+                t.Start();
             }
-
-            // return singleton instance
-            //return INSTANCE;
-
-            return INSTANCE_POOL
-                .OrderBy(a => a.GetCounters().TotalOutstanding)
-                .First();
+            foreach (var t in list)
+            {
+                t.Join();
+            }
         }
 
         //private static void performKeyDeleteTransaction(IDatabase db, int j)
@@ -473,14 +454,14 @@ return cjson.encode(groupResultData)";
             var redisServer = "clustercfg.shachlan-se-test-devo.sstwrm.use1devo.elmo-dev.amazonaws.com:6379";
             var memorydbServer = "clustercfg.stack-exchange-test-memorydb.sstwrm.memorydb-devo.us-east-1.amazonaws.com:6379";
 #pragma warning restore CS0219 // Variable is assigned but its value is never used
-            var client = ConnectionMultiplexer.Connect(GetOptions(redisServer));
+            var client = ConnectionMultiplexer.Connect(options(redisServer));
             //var client = ConnectionMultiplexer.Connect("stack-exchange-test-no-tls.4l6gyg.clustercfg.memorydb.eu-west-1.amazonaws.com");
             client.GetDatabase().Ping();
             var db = client.GetDatabase();
             db.StringSet("Ahoy", "Matey");
             Console.WriteLine(db.StringGet("Ahoy"));
 
-            massiveCalls(GetOptions(memorydbServer));
+            massiveCalls(options(memorydbServer));
             //intuitMassiveCalls();
         }
 
