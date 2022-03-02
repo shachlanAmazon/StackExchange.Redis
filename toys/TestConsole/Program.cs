@@ -329,16 +329,16 @@ return cjson.encode(groupResultData)";
             IntRange hashGet = new IntRange(writeRange.end(), 8);
             IntRange readRange = new IntRange(hashGet.end(), 1);
             IntRange hashValues = new IntRange(readRange.end(), 8);
-
+            
             List<Thread> list = new List<Thread>();
-            for (int i = 0; i < 2000; i++)
+            for (int i = 0; i < 6000; i++)
             {
                 var j = i;
                 var t = new Thread(() =>
                 {
-                    try
+                    for (var counter = 0; counter < 1000; counter++)
                     {
-                        for (var counter = 0; counter < 1000; counter++)
+                        try
                         {
                             var db = GetInstance().GetDatabase();
                             var randomCoinToss = random.Next(hashValues.end());
@@ -375,14 +375,11 @@ return cjson.encode(groupResultData)";
                                 db.HashValues(getDocKey(baseCounter + j));
                             }
                         }
-                    }
                     catch (Exception ex)
                     {
-                        if (ex.ToString().Contains("Timeout performing"))
-                        {
-                            Console.WriteLine("Caught " + ex);
-                        }
+                            Console.WriteLine("Caught " + ex.Message);
                     }
+                }
                 });
                 list.Add(t);
                 t.Start();
@@ -397,7 +394,7 @@ return cjson.encode(groupResultData)";
 
         private static ConfigurationOptions GetOptions(string server)
         {
-            var timeout = 30000;
+            var timeout = 5000;
             var options = ConfigurationOptions.Parse(server);
 
             options.ReconnectRetryPolicy = new LinearRetry(500);
