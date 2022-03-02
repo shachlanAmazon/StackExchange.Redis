@@ -854,6 +854,24 @@ namespace StackExchange.Redis
             return bridge;
         }
 
+        internal async Task AuthenticateAsync(PhysicalConnection connection, LogProxy log, string user, string password)
+        {
+            if (!string.IsNullOrWhiteSpace(user))
+            {
+                log?.WriteLine($"{Format.ToString(this)}: Authenticating (user/password)");
+                Message msg = Message.Create(-1, CommandFlags.FireAndForget, RedisCommand.AUTH, (RedisValue)user, (RedisValue)password);
+                msg.SetInternalCall();
+                await WriteDirectOrQueueFireAndForgetAsync(connection, msg, ResultProcessor.DemandOK).ForAwait();
+            }
+            else if (!string.IsNullOrWhiteSpace(password))
+            {
+                log?.WriteLine($"{Format.ToString(this)}: Authenticating (password)");
+                Message msg = Message.Create(-1, CommandFlags.FireAndForget, RedisCommand.AUTH, (RedisValue)password);
+                msg.SetInternalCall();
+                await WriteDirectOrQueueFireAndForgetAsync(connection, msg, ResultProcessor.DemandOK).ForAwait();
+            }
+        }
+
         private async Task HandshakeAsync(PhysicalConnection connection, LogProxy log)
         {
             log?.WriteLine($"{Format.ToString(this)}: Server handshake");
@@ -862,24 +880,12 @@ namespace StackExchange.Redis
                 Multiplexer.Trace("No connection!?");
                 return;
             }
-            Message msg;
+            
             // note that we need "" (not null) for password in the case of 'nopass' logins
             string user = Multiplexer.RawConfig.User, password = Multiplexer.RawConfig.Password ?? "";
-            if (!string.IsNullOrWhiteSpace(user))
-            {
-                log?.WriteLine($"{Format.ToString(this)}: Authenticating (user/password)");
-                msg = Message.Create(-1, CommandFlags.FireAndForget, RedisCommand.AUTH, (RedisValue)user, (RedisValue)password);
-                msg.SetInternalCall();
-                await WriteDirectOrQueueFireAndForgetAsync(connection, msg, ResultProcessor.DemandOK).ForAwait();
-            }
-            else if (!string.IsNullOrWhiteSpace(password))
-            {
-                log?.WriteLine($"{Format.ToString(this)}: Authenticating (password)");
-                msg = Message.Create(-1, CommandFlags.FireAndForget, RedisCommand.AUTH, (RedisValue)password);
-                msg.SetInternalCall();
-                await WriteDirectOrQueueFireAndForgetAsync(connection, msg, ResultProcessor.DemandOK).ForAwait();
-            }
+            await AuthenticateAsync(connection, log, user, password);
 
+            Message msg;
             if (Multiplexer.CommandMap.IsAvailable(RedisCommand.CLIENT))
             {
                 string name = Multiplexer.ClientName;

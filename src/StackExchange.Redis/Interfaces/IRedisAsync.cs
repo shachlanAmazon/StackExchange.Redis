@@ -45,5 +45,12 @@ namespace StackExchange.Redis
         /// </summary>
         /// <param name="tasks">The tasks to wait on.</param>
         void WaitAll(params Task[] tasks);
+
+
+        /// <summary>
+        /// Authenticate the connection asynchronously.
+        /// If user or password are null, the matching value from the Multiplexer's configuration will be used.
+        /// </summary>
+        Task ReauthenticateAsync(string password = null, string user = null);
     }
 }

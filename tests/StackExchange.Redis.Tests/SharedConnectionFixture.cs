@@ -288,6 +288,10 @@ namespace StackExchange.Redis.Tests
 
             public void ExportConfiguration(Stream destination, ExportOptions options = ExportOptions.All)
                 => _inner.ExportConfiguration(destination, options);
+
+            public void Reauthenticate(string user, string password) => _inner.Reauthenticate(user, password);
+
+            public Task ReauthenticateAsync(string user, string password) => _inner.ReauthenticateAsync(user, password);
         }
 
         public void Dispose() => _actualConnection.Dispose();

@@ -2233,7 +2233,7 @@ namespace StackExchange.Redis
         }
 
         internal readonly byte[] ConfigurationChangedChannel; // this gets accessed for every received event; let's make sure we can process it "raw"
-        internal readonly byte[] UniqueId = Guid.NewGuid().ToByteArray(); // unique identifier used when tracing
+        internal readonly byte[] UniqueId = Encoding.ASCII.GetBytes(Guid.NewGuid().ToString()); // unique identifier used when tracing
 
         /// <summary>
         /// Gets or sets whether asynchronous operations should be invoked in a way that guarantees their original delivery order
@@ -2901,6 +2901,26 @@ namespace StackExchange.Redis
         /// </summary>
         /// <param name="key">The <see cref="RedisKey"/> to determine the hash slot for.</param>
         public int GetHashSlot(RedisKey key) => ServerSelectionStrategy.HashSlot(key);
+
+
+        /// <summary>
+        /// Authenticate the connection to the server asynchronously.
+        /// If user or password are null, the matching value from the multiplexer's configuration will be used.
+        /// </summary>
+        public Task ReauthenticateAsync() {
+            var snapshots = GetServerSnapshot();
+            var authenticateTasks = new List<Task>(snapshots.Length);
+            foreach(var snapshot in snapshots)
+            {
+                Message msg = RawConfig.User != null ?
+                    Message.Create(-1, CommandFlags.FireAndForget, RedisCommand.AUTH, (RedisValue)RawConfig.User, (RedisValue)RawConfig.Password) :
+                    Message.Create(-1, CommandFlags.FireAndForget, RedisCommand.AUTH, (RedisValue)RawConfig.Password);
+                Console.WriteLine("Reauthenticate with: " + RawConfig.Password + " - " + RawConfig.User);
+                //authenticateTasks.Add(snapshot.ExecuteAsync(msg, ResultProcessor.DemandOK));
+            }
+
+            return Task.WhenAll(authenticateTasks);
+        }
     }
 
     internal enum WriteResult

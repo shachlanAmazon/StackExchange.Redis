@@ -113,6 +113,17 @@ namespace StackExchange.Redis
             return ResultProcessor.TimingProcessor.CreateMessage(0, flags, RedisCommand.EXISTS, (RedisValue)multiplexer.UniqueId);
         }
 
+        public Task ReauthenticateAsync(string password = null, string user = null)
+        {
+            multiplexer.RawConfig.User = user ?? multiplexer.RawConfig.User;
+            multiplexer.RawConfig.Password = password ?? multiplexer.RawConfig.Password;
+            Message msg = multiplexer.RawConfig.User != null ?
+                Message.Create(-1, CommandFlags.FireAndForget, RedisCommand.AUTH, (RedisValue)multiplexer.RawConfig.User, (RedisValue)multiplexer.RawConfig.Password) :
+                Message.Create(-1, CommandFlags.FireAndForget, RedisCommand.AUTH,(RedisValue)multiplexer.RawConfig.Password);
+            Console.WriteLine("Reauthenticate with: " + multiplexer.RawConfig.Password + " - " + multiplexer.RawConfig.User);
+            return ExecuteAsync(msg, ResultProcessor.DemandOK);
+        }
+
         internal static class CursorUtils
         {
             internal const long Origin = 0;

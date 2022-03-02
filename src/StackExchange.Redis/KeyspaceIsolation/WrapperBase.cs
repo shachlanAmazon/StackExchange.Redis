@@ -911,6 +911,13 @@ namespace StackExchange.Redis.KeyspaceIsolation
         {
             Inner.WaitAll(tasks);
         }
+
+
+        public Task ReauthenticateAsync(string password = null, string user = null)
+        {
+            return Inner.ReauthenticateAsync(password, user);
+        }
+
         protected internal RedisKey ToInner(RedisKey outer)
         {
             return RedisKey.WithPrefix(Prefix, outer);
